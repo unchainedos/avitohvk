@@ -6,7 +6,15 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"time"
+
+	"github.com/golang-jwt/jwt/v5"
 )
+
+type UserClaims struct {
+	UserID string `json:"user_id"`
+	jwt.RegisteredClaims
+}
 
 func ReadFromJSON[T any](response *http.Request) (*T, error) {
 	var req T
@@ -52,4 +60,19 @@ func WriteError(w http.ResponseWriter, err error) {
 	}
 
 	WriteJSON(w, status, statusErrors.ErrorResponse{Message: err.Error()})
+}
+
+func GenerateToken(userID string, secret []byte, ttl time.Duration) (string, error) {
+	now := time.Now()
+
+	claims := UserClaims{
+		UserID: userID,
+		RegisteredClaims: jwt.RegisteredClaims{
+			IssuedAt:  jwt.NewNumericDate(now),
+			ExpiresAt: jwt.NewNumericDate(now.Add(ttl)),
+		},
+	}
+
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+	return token.SignedString(secret)
 }
