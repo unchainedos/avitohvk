@@ -1,4 +1,4 @@
-package handler
+package utilhttp
 
 import (
 	statusErrors "avitohvk/internal/errors"
@@ -8,7 +8,7 @@ import (
 	"net/http"
 )
 
-func readFromJSON[T any](response *http.Request) (*T, error) {
+func ReadFromJSON[T any](response *http.Request) (*T, error) {
 	var req T
 	body, err := io.ReadAll(response.Body)
 	defer response.Body.Close()
@@ -21,7 +21,7 @@ func readFromJSON[T any](response *http.Request) (*T, error) {
 	return &req, nil
 }
 
-func writeJSON(w http.ResponseWriter, status int, data any) error {
+func WriteJSON(w http.ResponseWriter, status int, data any) error {
 	body, err := json.Marshal(data)
 	if err != nil {
 		return err
@@ -33,7 +33,7 @@ func writeJSON(w http.ResponseWriter, status int, data any) error {
 	return err
 }
 
-func writeError(w http.ResponseWriter, err error) {
+func WriteError(w http.ResponseWriter, err error) {
 	if err == nil {
 		w.WriteHeader(http.StatusOK)
 		return
@@ -51,5 +51,5 @@ func writeError(w http.ResponseWriter, err error) {
 		status = http.StatusConflict
 	}
 
-	writeJSON(w, status, statusErrors.ErrorResponse{Message: err.Error()})
+	WriteJSON(w, status, statusErrors.ErrorResponse{Message: err.Error()})
 }
