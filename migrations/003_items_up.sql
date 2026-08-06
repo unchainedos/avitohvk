@@ -15,8 +15,8 @@ create table items (
   constraint fk_items_user_holder foreign key (holder_id) references users(id)
 );
 
-create index idx_author_id on items(author_id);
-create index idx_holder_id on items(holder_id);
-create index idx_category on items(category);
-create index idx_locked_holder on items(holder_id, is_locked);
+create index idx_items_author_id on items(author_id);
+create index idx_items_holder_id on items(holder_id);
+create index idx_items_category on items(category);
+create index idx_items_locked_holder on items(holder_id, is_locked);
 

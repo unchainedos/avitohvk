@@ -15,8 +15,8 @@ create table wish_items(
     wish_id uuid not null,
     item_id uuid not null,
 
-    constraint fk_wish_id foreign key (wish_id) references wishes(id) on delete cascade,
-    constraint fk_item_id foreign key (item_id) references items(id) on delete cascade,
+    constraint fk_wishes_items_wish_id foreign key (wish_id) references wishes(id) on delete cascade,
+    constraint fk_wishes_items_item_id foreign key (item_id) references items(id) on delete cascade,
 
     primary key (wish_id, item_id)
 );
