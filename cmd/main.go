@@ -6,6 +6,7 @@ import (
 
 	"avitohvk/config"
 	"avitohvk/internal/server"
+	"avitohvk/internal/transport/handler/chown"
 	"avitohvk/internal/transport/router"
 )
 
@@ -18,7 +19,11 @@ func main() {
 		os.Exit(1)
 	}
 
-	handler := router.New()
+	handler := router.New(
+		router.WithGroup([]router.RouteRegistrator{
+			chown.New(),
+		}),
+	)
 
 	srv := server.StartServer(cfg, handler, logger)
 	srv.GracefulShutdown(logger)
