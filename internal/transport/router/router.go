@@ -10,6 +10,12 @@ type RouteRegistrator interface {
 	RegisterRoutes(r chi.Router)
 }
 
+type RegistratorFunc func(r chi.Router)
+
+func (f RegistratorFunc) RegisterRoutes(r chi.Router) {
+	f(r)
+}
+
 func New(opts ...Option) http.Handler {
 	cfg := &GroupConfig{}
 	for _, opt := range opts {

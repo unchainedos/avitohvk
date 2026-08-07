@@ -16,7 +16,7 @@ const (
 	defaultReadTimeout     = 10 * time.Second
 	defaultWriteTimeout    = 10 * time.Second
 	defaultIdleTimeout     = 60 * time.Second
-	defaultShutdownTimeout = 10 * time.Second
+	defaultShutdownTimeout = 60 * time.Minute
 	defaultAddr            = ":8080"
 	chanBufferSize         = 1
 )
