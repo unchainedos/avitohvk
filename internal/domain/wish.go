@@ -7,7 +7,7 @@ type Wish struct {
 	UserID      string
 	Title       string
 	Description *string
-	CreatedAT   time.Time
+	CreatedAt   time.Time
 }
 
 type WishItem struct {
