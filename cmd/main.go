@@ -12,13 +12,14 @@ import (
 func main() {
 	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
 
-	cfg := config.Config{Addr: "0.0.0.0:8080"}
+	cfg, err := config.NewConfig()
+	if err != nil {
+		logger.Error("failed to load config", "error", err)
+		os.Exit(1)
+	}
 
 	handler := router.New()
 
-	srv := server.New(cfg, handler, logger)
-	if err := srv.Run(); err != nil {
-		logger.Error("server exited with error", "error", err)
-		os.Exit(1)
-	}
+	srv := server.StartServer(cfg, handler, logger)
+	srv.GracefulShutdown(logger)
 }
