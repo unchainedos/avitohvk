@@ -14,9 +14,12 @@ func New() *ItemHandler {
 	return &ItemHandler{}
 }
 
-func (h *ItemHandler) RegisterRoutes(r chi.Router) {
-	r.Post("/items/{item_id}", h.Create)
+func (h *ItemHandler) RegisterPublicRoutes(r chi.Router) {
 	r.Get("/items/{item_id}", h.Get)
+}
+
+func (h *ItemHandler) RegisterProtectedRoutes(r chi.Router) {
+	r.Post("/items/{item_id}", h.Create)
 	r.Patch("/items/{item_id}", h.Update)
 	r.Delete("/items/{item_id}", h.Delete)
 }

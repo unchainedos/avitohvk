@@ -14,8 +14,13 @@ type HTTPServer struct {
 	ShutdownTimeout time.Duration  `mapstructure:"shutdown_timeout"`
 }
 
+type JWT struct {
+	Secret string `mapstructure:"secret"`
+}
+
 type Config struct {
 	Server HTTPServer `mapstructure:"server"`
+	JWT    JWT        `mapstructure:"jwt"`
 }
 
 func NewConfig() (*Config, error) {

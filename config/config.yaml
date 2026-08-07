@@ -4,3 +4,6 @@ app:
 
 server:
   addr: "0.0.0.0:8080"
+
+jwt:
+  secret: "avito-dev-jwt.secret"

@@ -14,9 +14,12 @@ func New() *WishHandler {
 	return &WishHandler{}
 }
 
-func (h *WishHandler) RegisterRoutes(r chi.Router) {
-	r.Post("/wishes/{wish_id}", h.Create)
+func (h *WishHandler) RegisterPublicRoutes(r chi.Router) {
 	r.Get("/wishes/{wish_id}", h.Get)
+}
+
+func (h *WishHandler) RegisterProtectedRoutes(r chi.Router) {
+	r.Post("/wishes/{wish_id}", h.Create)
 	r.Patch("/wishes/{wish_id}", h.Update)
 	r.Delete("/wishes/{wish_id}", h.Delete)
 }

@@ -13,7 +13,9 @@ import (
 	"avitohvk/internal/transport/handler/props"
 	"avitohvk/internal/transport/handler/search"
 	"avitohvk/internal/transport/handler/user"
+	"avitohvk/internal/transport/handler/users"
 	"avitohvk/internal/transport/handler/wish"
+	"avitohvk/internal/transport/middleware"
 	"avitohvk/internal/transport/router"
 )
 
@@ -26,17 +28,27 @@ func main() {
 		os.Exit(1)
 	}
 
+	itemHandler := item.New()
+	wishHandler := wish.New()
+	usersHandler := users.New()
+
 	handler := router.New(
+		router.WithGroup([]router.RouteRegistrator{
+			auth.New(),
+			search.New(),
+			router.RegistratorFunc(itemHandler.RegisterPublicRoutes),
+			router.RegistratorFunc(wishHandler.RegisterPublicRoutes),
+			router.RegistratorFunc(usersHandler.RegisterPublicRoutes),
+		}),
 		router.WithGroup([]router.RouteRegistrator{
 			chown.New(),
 			deal.New(),
-			search.New(),
-			auth.New(),
 			user.New(),
-			item.New(),
-			wish.New(),
 			props.New(),
-		}),
+			router.RegistratorFunc(itemHandler.RegisterProtectedRoutes),
+			router.RegistratorFunc(wishHandler.RegisterProtectedRoutes),
+			router.RegistratorFunc(usersHandler.RegisterProtectedRoutes),
+		}, middleware.NewJWTAuth([]byte(cfg.JWT.Secret), logger)),
 	)
 
 	srv := server.StartServer(cfg, handler, logger)
