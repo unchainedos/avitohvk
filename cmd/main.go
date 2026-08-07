@@ -8,7 +8,10 @@ import (
 	"avitohvk/internal/server"
 	"avitohvk/internal/transport/handler/auth"
 	"avitohvk/internal/transport/handler/chown"
+	"avitohvk/internal/transport/handler/item"
 	"avitohvk/internal/transport/handler/search"
+	"avitohvk/internal/transport/handler/user"
+	"avitohvk/internal/transport/handler/wish"
 	"avitohvk/internal/transport/router"
 )
 
@@ -26,6 +29,9 @@ func main() {
 			chown.New(),
 			search.New(),
 			auth.New(),
+			user.New(),
+			item.New(),
+			wish.New(),
 		}),
 	)
 
