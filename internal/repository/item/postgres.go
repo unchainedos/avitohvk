@@ -1,9 +1,10 @@
 package item
 
 import (
-	"avitohvk/internal/domain"
 	"context"
 	"errors"
+
+	"avitohvk/internal/domain"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -25,22 +26,14 @@ func (r *Repository) Create(ctx context.Context, item domain.Item) (string, erro
 	if item.ID != "" {
 		const q = `
 			INSERT INTO items (
-				id, 
-				author_id, 
-				holder_id, 
-				title, 
-				description, 
-				image_url, 
-				category, 
-				unit, 
-				quantity, 
-				is_locked, 
+				id, author_id, holder_id, title, description,
+				image_url, category, unit, quantity, is_locked
 			) VALUES (
-				&1::uuid, &2::uuid, &3::uuid, &4, &5, &6, &7, &8, &9, &10
+				$1::uuid, $2::uuid, $3::uuid, $4, $5,
+				$6, $7, $8, $9, $10
 			)
 			RETURNING id::text
 		`
-
 		var id string
 		err := r.pool.QueryRow(ctx, q,
 			item.ID,
@@ -54,24 +47,16 @@ func (r *Repository) Create(ctx context.Context, item domain.Item) (string, erro
 			item.Quantity,
 			item.IsLocked,
 		).Scan(&id)
-
 		return id, err
-
 	}
 
 	const q = `
 		INSERT INTO items (
-			author_id, 
-			holder_id, 
-			title, 
-			description, 
-			image_url, 
-			category, 
-			unit, 
-			quantity, 
-			is_locked, 
+			author_id, holder_id, title, description,
+			image_url, category, unit, quantity, is_locked
 		) VALUES (
-			&1::uuid, &2::uuid, &4, &5, &6, &7, &8, &9
+			$1::uuid, $2::uuid, $3, $4,
+			$5, $6, $7, $8, $9
 		)
 		RETURNING id::text
 	`
@@ -87,7 +72,6 @@ func (r *Repository) Create(ctx context.Context, item domain.Item) (string, erro
 		item.Quantity,
 		item.IsLocked,
 	).Scan(&id)
-
 	return id, err
 }
 
@@ -128,6 +112,7 @@ func (r *Repository) ListByUserID(ctx context.Context, userID string) ([]domain.
 		return nil, err
 	}
 	defer rows.Close()
+
 	items := make([]domain.Item, 0)
 	for rows.Next() {
 		var item domain.Item
@@ -141,6 +126,7 @@ func (r *Repository) ListByUserID(ctx context.Context, userID string) ([]domain.
 		}
 		items = append(items, item)
 	}
+	return items, rows.Err()
 }
 
 func (r *Repository) Update(ctx context.Context, id string, item domain.Item) error {
@@ -161,7 +147,7 @@ func (r *Repository) Update(ctx context.Context, id string, item domain.Item) er
 		item.Category,
 		item.Unit,
 		item.Quantity,
-		item.ID,
+		id,
 	)
 	if err != nil {
 		return err
