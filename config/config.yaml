@@ -7,3 +7,7 @@ server:
 
 jwt:
   secret: "avito-dev-jwt.secret"
+  ttl: 24h
+
+database:
+  url: "postgres://avitohvk:avitohvk@localhost:5432/avitohvk?sslmode=disable"

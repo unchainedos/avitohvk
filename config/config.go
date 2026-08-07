@@ -15,12 +15,18 @@ type HTTPServer struct {
 }
 
 type JWT struct {
-	Secret string `mapstructure:"secret"`
+	Secret string         `mapstructure:"secret"`
+	TTL    *time.Duration `mapstructure:"ttl"`
+}
+
+type Database struct {
+	URL string `mapstructure:"url"`
 }
 
 type Config struct {
-	Server HTTPServer `mapstructure:"server"`
-	JWT    JWT        `mapstructure:"jwt"`
+	Server   HTTPServer `mapstructure:"server"`
+	JWT      JWT        `mapstructure:"jwt"`
+	Database Database   `mapstructure:"database"`
 }
 
 func NewConfig() (*Config, error) {
