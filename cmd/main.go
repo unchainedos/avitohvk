@@ -10,6 +10,7 @@ import (
 	"avitohvk/internal/transport/handler/chown"
 	"avitohvk/internal/transport/handler/deal"
 	"avitohvk/internal/transport/handler/item"
+	"avitohvk/internal/transport/handler/props"
 	"avitohvk/internal/transport/handler/search"
 	"avitohvk/internal/transport/handler/user"
 	"avitohvk/internal/transport/handler/wish"
@@ -34,6 +35,7 @@ func main() {
 			user.New(),
 			item.New(),
 			wish.New(),
+			props.New(),
 		}),
 	)
 
