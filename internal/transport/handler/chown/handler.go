@@ -19,5 +19,5 @@ func (h *ChownHandler) RegisterRoutes(r chi.Router) {
 }
 
 func (h *ChownHandler) Chown(w http.ResponseWriter, r *http.Request) {
-	utilhttp.WriteJSON(w, http.StatusOK, map[string]string{"content": "hello world"})
+	utilhttp.WriteJSON(w, http.StatusOK, map[string]string{"content": "chown hello world"})
 }

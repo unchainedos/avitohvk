@@ -7,6 +7,7 @@ import (
 	"avitohvk/config"
 	"avitohvk/internal/server"
 	"avitohvk/internal/transport/handler/chown"
+	"avitohvk/internal/transport/handler/search"
 	"avitohvk/internal/transport/router"
 )
 
@@ -22,6 +23,7 @@ func main() {
 	handler := router.New(
 		router.WithGroup([]router.RouteRegistrator{
 			chown.New(),
+			search.New(),
 		}),
 	)
 
