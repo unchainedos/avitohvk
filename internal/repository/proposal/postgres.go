@@ -41,16 +41,15 @@ func (r *Repository) Create(ctx context.Context, dealID, participantID, itemID s
 	defer tx.Rollback(ctx)
 
 	const qDeal = `
-		SELECT participants, (root_item_id = $2::uuid), negotiation_window_seconds, deadline_at
+		SELECT participants, negotiation_window_seconds, deadline_at
 		FROM chain_deals
 		WHERE id = $1::uuid
 		FOR UPDATE
 	`
 	var participants int
-	var isRootItem bool
 	var negotiationWindowSeconds int64
 	var deadlineAt *time.Time
-	if err := tx.QueryRow(ctx, qDeal, dealID, itemID).Scan(&participants, &isRootItem, &negotiationWindowSeconds, &deadlineAt); err != nil {
+	if err := tx.QueryRow(ctx, qDeal, dealID).Scan(&participants, &negotiationWindowSeconds, &deadlineAt); err != nil {
 		return domain.Proposal{}, err
 	}
 
@@ -63,7 +62,8 @@ func (r *Repository) Create(ctx context.Context, dealID, participantID, itemID s
 		return domain.Proposal{}, ErrDealFull
 	}
 
-	if isRootItem && deadlineAt == nil {
+	// This join is what completes the chain end-to-end: start the negotiation deadline now.
+	if deadlineAt == nil && count+1 == participants {
 		deadline := time.Now().Add(time.Duration(negotiationWindowSeconds) * time.Second)
 		const qStart = `UPDATE chain_deals SET deadline_at = $2 WHERE id = $1::uuid`
 		if _, err := tx.Exec(ctx, qStart, dealID, deadline); err != nil {

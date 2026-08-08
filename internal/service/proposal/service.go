@@ -187,6 +187,13 @@ func (s *Service) WithdrawProposal(ctx context.Context, actorID, dealID string) 
 		}
 		return err
 	}
+
+	if _, err := s.deals.UpdateStatus(ctx, dealID, domain.DealStatusCancelled); err != nil {
+		return err
+	}
+	if err := s.proposals.UnlockAllForDeal(ctx, dealID); err != nil {
+		return err
+	}
 	return nil
 }
 
