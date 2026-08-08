@@ -61,9 +61,6 @@ func WriteError(w http.ResponseWriter, err error) {
 	case errors.Is(err, statusErrors.ErrConflict):
 		status = http.StatusConflict
 	default:
-		// Malformed input (e.g. a non-UUID path/body value) reaching the DB
-		// as an invalid_text_representation error is a client mistake, not
-		// a server failure.
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) && pgErr.Code == "22P02" {
 			status = http.StatusBadRequest
@@ -72,8 +69,6 @@ func WriteError(w http.ResponseWriter, err error) {
 	}
 
 	if status == http.StatusInternalServerError {
-		// Never leak internal error detail (DB schema, constraint names,
-		// SQLSTATE, ...) to the client — log it server-side instead.
 		slog.Error("unhandled request error", "error", err)
 		message = "internal server error"
 	}

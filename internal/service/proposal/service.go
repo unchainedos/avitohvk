@@ -19,6 +19,7 @@ type DealRepository interface {
 	Create(ctx context.Context, rootItemID, creatorID string, negotiationWindow time.Duration) (domain.Deal, error)
 	GetByID(ctx context.Context, id string) (domain.Deal, error)
 	UpdateStatus(ctx context.Context, id string, status domain.DealStatus) (domain.Deal, error)
+	LockDeal(ctx context.Context, dealID string) (func(context.Context), error)
 }
 
 type ProposalRepository interface {
@@ -170,6 +171,12 @@ func (s *Service) UpdateProposal(ctx context.Context, actorID, dealID string, up
 }
 
 func (s *Service) WithdrawProposal(ctx context.Context, actorID, dealID string) error {
+	release, err := s.deals.LockDeal(ctx, dealID)
+	if err != nil {
+		return err
+	}
+	defer release(context.WithoutCancel(ctx))
+
 	d, err := s.GetByID(ctx, dealID)
 	if err != nil {
 		return err
@@ -210,6 +217,12 @@ func (s *Service) ListForUser(ctx context.Context, actorID, userID string) ([]do
 }
 
 func (s *Service) Approve(ctx context.Context, actorID, dealID string) (domain.Proposal, error) {
+	release, err := s.deals.LockDeal(ctx, dealID)
+	if err != nil {
+		return domain.Proposal{}, err
+	}
+	defer release(context.WithoutCancel(ctx))
+
 	d, err := s.GetByID(ctx, dealID)
 	if err != nil {
 		return domain.Proposal{}, err

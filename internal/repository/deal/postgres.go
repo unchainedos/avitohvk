@@ -65,6 +65,26 @@ func (r *Repository) UpdateStatus(ctx context.Context, id string, status domain.
 	return r.scanDeal(r.pool.QueryRow(ctx, q, id, status))
 }
 
+// LockDeal serializes Approve/Withdraw (and any other multi-step, multi-transaction
+// mutation of a deal's status) against each other for the given deal, since those
+// flows read chain_deals.status and later act on it across several separate
+// transactions with no single row-level lock spanning the whole sequence.
+// The caller must invoke the returned release func exactly once when done.
+func (r *Repository) LockDeal(ctx context.Context, dealID string) (func(context.Context), error) {
+	conn, err := r.pool.Acquire(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := conn.Exec(ctx, `SELECT pg_advisory_lock(hashtextextended($1, 0))`, dealID); err != nil {
+		conn.Release()
+		return nil, err
+	}
+	return func(unlockCtx context.Context) {
+		conn.Exec(unlockCtx, `SELECT pg_advisory_unlock(hashtextextended($1, 0))`, dealID)
+		conn.Release()
+	}, nil
+}
+
 func (r *Repository) scanDeal(row pgx.Row) (domain.Deal, error) {
 	var d domain.Deal
 	var seconds int64
