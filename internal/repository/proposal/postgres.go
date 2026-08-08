@@ -222,6 +222,18 @@ func (r *Repository) SetStatus(ctx context.Context, dealID, participantID string
 	if err != nil {
 		return domain.Proposal{}, err
 	}
+
+	if status == domain.ProposalStatusAccepted {
+		const qExtend = `
+			UPDATE chain_deals
+			SET deadline_at = now() + (negotiation_window_seconds || ' seconds')::interval
+			WHERE id = $1::uuid
+		`
+		if _, err := tx.Exec(ctx, qExtend, dealID); err != nil {
+			return domain.Proposal{}, err
+		}
+	}
+
 	if err := tx.Commit(ctx); err != nil {
 		return domain.Proposal{}, err
 	}
