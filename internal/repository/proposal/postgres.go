@@ -392,6 +392,33 @@ func (r *Repository) TryLockChain(ctx context.Context, dealID string) error {
 	return tx.Commit(ctx)
 }
 
+func (r *Repository) ListTransfers(ctx context.Context, dealID string) ([]domain.ItemTransfer, error) {
+	const q = `
+		SELECT t.item_id::text, t.to_user::text
+		FROM chain_deal_transactions cdt
+		JOIN transactions t ON t.id = cdt.transaction_id
+		WHERE cdt.deal_id = $1::uuid
+	`
+	rows, err := r.pool.Query(ctx, q, dealID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	list := make([]domain.ItemTransfer, 0)
+	for rows.Next() {
+		var it domain.ItemTransfer
+		if err := rows.Scan(&it.ItemID, &it.ToUserID); err != nil {
+			return nil, err
+		}
+		list = append(list, it)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return list, nil
+}
+
 func (r *Repository) UnlockAllForDeal(ctx context.Context, dealID string) error {
 	const q = `
 		UPDATE items

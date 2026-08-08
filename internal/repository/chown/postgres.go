@@ -173,3 +173,42 @@ func tossItem(ctx context.Context, tx pgx.Tx, actorID, itemID string, quantity f
 
 	return toUserID, nil
 }
+
+func (r *Repository) CompleteTransfer(ctx context.Context, itemID, toUserID string) error {
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+
+	const qTransfer = `
+		UPDATE items
+		SET holder_id = $2::uuid, is_locked = false, locked_by_deal_id = NULL
+		WHERE id = $1::uuid
+	`
+	if _, err := tx.Exec(ctx, qTransfer, itemID, toUserID); err != nil {
+		return err
+	}
+
+	const qWish = `
+		SELECT wi.wish_id::text
+		FROM wish_items wi
+		JOIN wishes w ON w.id = wi.wish_id
+		WHERE wi.item_id = $1::uuid AND w.user_id = $2::uuid
+		ORDER BY w.created_at
+		LIMIT 1
+	`
+	var wishID string
+	err = tx.QueryRow(ctx, qWish, itemID, toUserID).Scan(&wishID)
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return err
+	}
+	if err == nil {
+		const qUnlink = `DELETE FROM wish_items WHERE wish_id = $1::uuid AND item_id = $2::uuid`
+		if _, err := tx.Exec(ctx, qUnlink, wishID, itemID); err != nil {
+			return err
+		}
+	}
+
+	return tx.Commit(ctx)
+}

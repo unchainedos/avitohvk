@@ -30,15 +30,21 @@ type ProposalRepository interface {
 	AllAccepted(ctx context.Context, dealID string) (bool, error)
 	TryLockChain(ctx context.Context, dealID string) error
 	UnlockAllForDeal(ctx context.Context, dealID string) error
+	ListTransfers(ctx context.Context, dealID string) ([]domain.ItemTransfer, error)
+}
+
+type ChownRepository interface {
+	CompleteTransfer(ctx context.Context, itemID, toUserID string) error
 }
 
 type Service struct {
 	deals     DealRepository
 	proposals ProposalRepository
+	chown     ChownRepository
 }
 
-func NewService(deals DealRepository, proposals ProposalRepository) *Service {
-	return &Service{deals: deals, proposals: proposals}
+func NewService(deals DealRepository, proposals ProposalRepository, chown ChownRepository) *Service {
+	return &Service{deals: deals, proposals: proposals, chown: chown}
 }
 
 func (s *Service) GetByID(ctx context.Context, id string) (domain.Deal, error) {
@@ -236,6 +242,20 @@ func (s *Service) Approve(ctx context.Context, actorID, dealID string) (domain.P
 	}
 	if allAccepted {
 		if _, err := s.deals.UpdateStatus(ctx, dealID, domain.DealStatusConfirmed); err != nil {
+			return domain.Proposal{}, err
+		}
+
+		transfers, err := s.proposals.ListTransfers(ctx, dealID)
+		if err != nil {
+			return domain.Proposal{}, err
+		}
+		for _, t := range transfers {
+			if err := s.chown.CompleteTransfer(ctx, t.ItemID, t.ToUserID); err != nil {
+				return domain.Proposal{}, err
+			}
+		}
+
+		if _, err := s.deals.UpdateStatus(ctx, dealID, domain.DealStatusCompleted); err != nil {
 			return domain.Proposal{}, err
 		}
 	}

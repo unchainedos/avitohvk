@@ -55,12 +55,13 @@ func main() {
 	authHandler := auth.New(userSvc)
 	userHandler := user.New(userSvc)
 
-	proposalSvc := proposalservice.NewService(dealrepo.NewRepository(pool), proposalrepo.NewRepository(pool))
+	chownRepo := chownrepo.NewRepository(pool)
+	chownSvc := chownservice.NewService(chownRepo)
+	chownHandler := chown.New(chownSvc)
+
+	proposalSvc := proposalservice.NewService(dealrepo.NewRepository(pool), proposalrepo.NewRepository(pool), chownRepo)
 	dealHandler := deal.New(proposalSvc)
 	propsHandler := props.New(proposalSvc)
-
-	chownSvc := chownservice.NewService(chownrepo.NewRepository(pool))
-	chownHandler := chown.New(chownSvc)
 
 	itemHandler := item.New()
 	wishHandler := wish.New()
