@@ -45,7 +45,7 @@ func (s *Service) GetByID(ctx context.Context, id string) (domain.Deal, error) {
 	d, err := s.deals.GetByID(ctx, id)
 	if err != nil {
 		if errors.Is(err, dealrepo.ErrNotFound) {
-			return domain.Deal{}, statusErrors.ErrNotFound
+			return domain.Deal{}, fmt.Errorf("%w: deal not found", statusErrors.ErrNotFound)
 		}
 		return domain.Deal{}, err
 	}
@@ -123,7 +123,7 @@ func (s *Service) GetProposal(ctx context.Context, actorID, dealID string) (doma
 	p, err := s.proposals.GetByDealAndParticipant(ctx, dealID, actorID)
 	if err != nil {
 		if errors.Is(err, proposalrepo.ErrNotFound) {
-			return domain.Proposal{}, statusErrors.ErrNotFound
+			return domain.Proposal{}, fmt.Errorf("%w: proposal not found", statusErrors.ErrNotFound)
 		}
 		return domain.Proposal{}, err
 	}
@@ -138,7 +138,7 @@ func (s *Service) UpdateProposal(ctx context.Context, actorID, dealID string, up
 	p, err := s.proposals.Update(ctx, dealID, actorID, upd)
 	if err != nil {
 		if errors.Is(err, proposalrepo.ErrNotFound) {
-			return domain.Proposal{}, statusErrors.ErrNotFound
+			return domain.Proposal{}, fmt.Errorf("%w: proposal not found", statusErrors.ErrNotFound)
 		}
 		if errors.Is(err, proposalrepo.ErrItemNotFound) {
 			return domain.Proposal{}, fmt.Errorf("%w: item not found", statusErrors.ErrNotFound)
@@ -169,7 +169,7 @@ func (s *Service) WithdrawProposal(ctx context.Context, actorID, dealID string) 
 	_, err = s.proposals.SetStatus(ctx, dealID, actorID, domain.ProposalStatusDeclined)
 	if err != nil {
 		if errors.Is(err, proposalrepo.ErrNotFound) {
-			return statusErrors.ErrNotFound
+			return fmt.Errorf("%w: proposal not found", statusErrors.ErrNotFound)
 		}
 		if errors.Is(err, proposalrepo.ErrNotPending) {
 			return fmt.Errorf("%w: proposal is not pending", statusErrors.ErrConflict)
@@ -209,7 +209,7 @@ func (s *Service) Approve(ctx context.Context, actorID, dealID string) (domain.P
 	p, err := s.proposals.SetStatus(ctx, dealID, actorID, domain.ProposalStatusAccepted)
 	if err != nil {
 		if errors.Is(err, proposalrepo.ErrNotFound) {
-			return domain.Proposal{}, statusErrors.ErrNotFound
+			return domain.Proposal{}, fmt.Errorf("%w: proposal not found", statusErrors.ErrNotFound)
 		}
 		if errors.Is(err, proposalrepo.ErrNotPending) {
 			return domain.Proposal{}, fmt.Errorf("%w: proposal is not pending", statusErrors.ErrConflict)
