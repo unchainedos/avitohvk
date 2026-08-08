@@ -11,8 +11,6 @@ const (
 	ProposalStatusWaitingRequiredUser ProposalStatus = "WAITING_FOR_THE_REQUIRED_USER"
 )
 
-// Proposal is one participant's link in a chain deal (chain_deal_transactions),
-// together with the underlying transfer fact it points to (transactions).
 type Proposal struct {
 	DealID        string
 	TransactionID string
