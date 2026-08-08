@@ -18,9 +18,7 @@ type Deal struct {
 	Status            DealStatus
 	Participants      int
 	NegotiationWindow time.Duration
-	// DeadlineAt is nil until the participant offering the root item joins the chain;
-	// only then does the negotiation window between the creator and them start ticking.
-	DeadlineAt *time.Time
-	CreatedAt  time.Time
-	UpdatedAt  time.Time
+	DeadlineAt        *time.Time
+	CreatedAt         time.Time
+	UpdatedAt         time.Time
 }

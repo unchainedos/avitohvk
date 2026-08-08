@@ -22,6 +22,7 @@ var (
 	ErrAlreadyProposed   = errors.New("proposal already exists for this deal")
 	ErrDealFull          = errors.New("deal already has enough participants")
 	ErrNotPending        = errors.New("proposal is not pending")
+	ErrOutOfOrder        = errors.New("recipient has not accepted yet")
 )
 
 type Repository struct {
@@ -204,6 +205,16 @@ func (r *Repository) SetStatus(ctx context.Context, dealID, participantID string
 		return domain.Proposal{}, err
 	}
 
+	if status == domain.ProposalStatusAccepted {
+		allowed, err := isApprovalAllowed(ctx, tx, dealID, participantID)
+		if err != nil {
+			return domain.Proposal{}, err
+		}
+		if !allowed {
+			return domain.Proposal{}, ErrOutOfOrder
+		}
+	}
+
 	const q = `
 		UPDATE chain_deal_transactions cdt
 		SET status = $3
@@ -281,10 +292,6 @@ func (r *Repository) CountForDeal(ctx context.Context, dealID string) (int, erro
 	return count, nil
 }
 
-// TryLockChain locks every item currently offered in the deal's chain, but only once both
-// the deal creator's own proposal and the proposal offering the root item are ACCEPTED.
-// Before that point items stay unlocked and can be freely offered in other deals. Once locked,
-// any other still-PENDING deal referencing one of the now-locked items is cancelled.
 func (r *Repository) TryLockChain(ctx context.Context, dealID string) error {
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
@@ -293,14 +300,24 @@ func (r *Repository) TryLockChain(ctx context.Context, dealID string) error {
 	defer tx.Rollback(ctx)
 
 	const qDeal = `
-		SELECT creator_id::text, root_item_id::text
+		SELECT creator_id::text, root_item_id::text, participants
 		FROM chain_deals
 		WHERE id = $1::uuid
 		FOR UPDATE
 	`
 	var creatorID, rootItemID string
-	if err := tx.QueryRow(ctx, qDeal, dealID).Scan(&creatorID, &rootItemID); err != nil {
+	var participants int
+	if err := tx.QueryRow(ctx, qDeal, dealID).Scan(&creatorID, &rootItemID, &participants); err != nil {
 		return err
+	}
+
+	const qChainCount = `SELECT COUNT(*) FROM chain_deal_transactions WHERE deal_id = $1::uuid`
+	var count int
+	if err := tx.QueryRow(ctx, qChainCount, dealID).Scan(&count); err != nil {
+		return err
+	}
+	if count < participants {
+		return tx.Commit(ctx)
 	}
 
 	const qAccepted = `
@@ -426,6 +443,32 @@ func lockPending(ctx context.Context, tx pgx.Tx, dealID, participantID string) e
 		return ErrNotPending
 	}
 	return nil
+}
+
+func isApprovalAllowed(ctx context.Context, tx pgx.Tx, dealID, participantID string) (bool, error) {
+	const query = `
+		SELECT
+			cd.creator_id = $2::uuid
+			OR t.item_id = cd.root_item_id
+			OR (
+				ri.is_locked
+				AND EXISTS (
+					SELECT 1 FROM chain_deal_transactions cdt2
+					WHERE cdt2.deal_id = $1::uuid AND cdt2.participant_id = t.to_user AND cdt2.status = 'ACCEPTED'
+				)
+			)
+		FROM chain_deals cd
+		JOIN chain_deal_transactions cdt ON cdt.deal_id = cd.id AND cdt.participant_id = $2::uuid
+		JOIN transactions t ON t.id = cdt.transaction_id
+		JOIN items ri ON ri.id = cd.root_item_id
+		WHERE cd.id = $1::uuid
+	`
+	var allowed bool
+	err := tx.QueryRow(ctx, query, dealID, participantID).Scan(&allowed)
+	if err != nil {
+		return false, err
+	}
+	return allowed, nil
 }
 
 func checkItemHolder(ctx context.Context, q rowQuerier, itemID, participantID string) error {
