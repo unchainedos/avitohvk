@@ -3,10 +3,11 @@ package dto
 import "time"
 
 type CreateDealRequest struct {
-	RootItemID string    `json:"root_item_id"`
-	DeadlineAt time.Time `json:"deadline_at"`
-	ItemID     string    `json:"item_id"`
-	Quantity   float64   `json:"quantity"`
+	RootItemID   string    `json:"root_item_id"`
+	DeadlineAt   time.Time `json:"deadline_at"`
+	ItemID       string    `json:"item_id"`
+	Quantity     float64   `json:"quantity"`
+	Participants int       `json:"participants"`
 }
 
 type CreateProposalRequest struct {

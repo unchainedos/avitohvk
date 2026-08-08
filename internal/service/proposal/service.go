@@ -13,7 +13,7 @@ import (
 	proposalrepo "avitohvk/internal/repository/proposal"
 )
 
-const defaultParticipants = 2
+const minParticipants = 2
 
 type DealRepository interface {
 	Create(ctx context.Context, rootItemID string, participants int, deadlineAt time.Time) (domain.Deal, error)
@@ -28,6 +28,7 @@ type ProposalRepository interface {
 	SetStatus(ctx context.Context, dealID, participantID string, status domain.ProposalStatus) (domain.Proposal, error)
 	ListForUser(ctx context.Context, userID string) ([]domain.Proposal, error)
 	AllAccepted(ctx context.Context, dealID string) (bool, error)
+	CountForDeal(ctx context.Context, dealID string) (int, error)
 }
 
 type Service struct {
@@ -57,11 +58,14 @@ func (s *Service) CreateDeal(ctx context.Context, actorID string, req dto.Create
 	if req.RootItemID == "" {
 		return domain.Proposal{}, fmt.Errorf("%w: root_item_id required", statusErrors.ErrBadRequest)
 	}
+	if req.Participants < minParticipants {
+		return domain.Proposal{}, fmt.Errorf("%w: participants must be at least %d", statusErrors.ErrBadRequest, minParticipants)
+	}
 	if !req.DeadlineAt.After(time.Now()) {
 		return domain.Proposal{}, fmt.Errorf("%w: deadline_at must be in the future", statusErrors.ErrBadRequest)
 	}
 
-	d, err := s.deals.Create(ctx, req.RootItemID, defaultParticipants, req.DeadlineAt)
+	d, err := s.deals.Create(ctx, req.RootItemID, req.Participants, req.DeadlineAt)
 	if err != nil {
 		if errors.Is(err, dealrepo.ErrRootItemNotFound) {
 			return domain.Proposal{}, fmt.Errorf("%w: root item not found", statusErrors.ErrNotFound)
@@ -85,6 +89,14 @@ func (s *Service) CreateProposal(ctx context.Context, actorID, dealID string, re
 		return domain.Proposal{}, fmt.Errorf("%w: deal is not open for new proposals", statusErrors.ErrConflict)
 	}
 
+	count, err := s.proposals.CountForDeal(ctx, dealID)
+	if err != nil {
+		return domain.Proposal{}, err
+	}
+	if count >= d.Participants {
+		return domain.Proposal{}, fmt.Errorf("%w: deal already has enough participants", statusErrors.ErrConflict)
+	}
+
 	if _, err := s.proposals.GetByDealAndParticipant(ctx, dealID, actorID); err == nil {
 		return domain.Proposal{}, fmt.Errorf("%w: proposal already exists for this deal", statusErrors.ErrConflict)
 	} else if !errors.Is(err, proposalrepo.ErrNotFound) {
@@ -99,6 +111,9 @@ func (s *Service) createProposal(ctx context.Context, dealID, actorID, itemID st
 	if err != nil {
 		if errors.Is(err, proposalrepo.ErrItemNotFound) {
 			return domain.Proposal{}, fmt.Errorf("%w: item not found", statusErrors.ErrNotFound)
+		}
+		if errors.Is(err, proposalrepo.ErrRecipientNotFound) {
+			return domain.Proposal{}, fmt.Errorf("%w: no one wishes for this item", statusErrors.ErrNotFound)
 		}
 		return domain.Proposal{}, err
 	}
@@ -128,6 +143,9 @@ func (s *Service) UpdateProposal(ctx context.Context, actorID, dealID string, up
 		}
 		if errors.Is(err, proposalrepo.ErrItemNotFound) {
 			return domain.Proposal{}, fmt.Errorf("%w: item not found", statusErrors.ErrNotFound)
+		}
+		if errors.Is(err, proposalrepo.ErrRecipientNotFound) {
+			return domain.Proposal{}, fmt.Errorf("%w: no one wishes for this item", statusErrors.ErrNotFound)
 		}
 		return domain.Proposal{}, err
 	}
