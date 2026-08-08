@@ -70,7 +70,7 @@ func main() {
 			router.RegistratorFunc(usersHandler.RegisterPublicRoutes),
 		}),
 		router.WithGroup([]router.RouteRegistrator{
-			chown.New(),
+			// chown.New(chownSvc), // TODO: wire up once chown service/repository land
 			dealHandler,
 			userHandler,
 			propsHandler,
