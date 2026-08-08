@@ -18,6 +18,7 @@ var (
 	ErrItemNotFound      = errors.New("item not found")
 	ErrRecipientNotFound = errors.New("no one wishes for this item")
 	ErrNotItemHolder     = errors.New("participant does not hold this item")
+	ErrAlreadyProposed   = errors.New("proposal already exists for this deal")
 )
 
 type Repository struct {
@@ -65,6 +66,10 @@ func (r *Repository) Create(ctx context.Context, dealID, participantID, itemID s
 	`
 	var p domain.Proposal
 	if err := tx.QueryRow(ctx, qLink, dealID, transactionID, participantID).Scan(&p.Status, &p.UpdatedAt); err != nil {
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+			return domain.Proposal{}, ErrAlreadyProposed
+		}
 		return domain.Proposal{}, err
 	}
 

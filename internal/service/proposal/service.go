@@ -118,6 +118,9 @@ func (s *Service) createProposal(ctx context.Context, dealID, actorID, itemID st
 		if errors.Is(err, proposalrepo.ErrNotItemHolder) {
 			return domain.Proposal{}, fmt.Errorf("%w: you do not hold this item", statusErrors.ErrConflict)
 		}
+		if errors.Is(err, proposalrepo.ErrAlreadyProposed) {
+			return domain.Proposal{}, fmt.Errorf("%w: proposal already exists for this deal", statusErrors.ErrConflict)
+		}
 		return domain.Proposal{}, err
 	}
 	return p, nil
