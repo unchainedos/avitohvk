@@ -19,6 +19,7 @@ var (
 	ErrRecipientNotFound = errors.New("no one wishes for this item")
 	ErrNotItemHolder     = errors.New("participant does not hold this item")
 	ErrAlreadyProposed   = errors.New("proposal already exists for this deal")
+	ErrDealFull          = errors.New("deal already has enough participants")
 )
 
 type Repository struct {
@@ -35,6 +36,21 @@ func (r *Repository) Create(ctx context.Context, dealID, participantID, itemID s
 		return domain.Proposal{}, err
 	}
 	defer tx.Rollback(ctx)
+
+	const qDeal = `SELECT participants FROM chain_deals WHERE id = $1::uuid FOR UPDATE`
+	var participants int
+	if err := tx.QueryRow(ctx, qDeal, dealID).Scan(&participants); err != nil {
+		return domain.Proposal{}, err
+	}
+
+	const qCount = `SELECT COUNT(*) FROM chain_deal_transactions WHERE deal_id = $1::uuid`
+	var count int
+	if err := tx.QueryRow(ctx, qCount, dealID).Scan(&count); err != nil {
+		return domain.Proposal{}, err
+	}
+	if count >= participants {
+		return domain.Proposal{}, ErrDealFull
+	}
 
 	if err := checkItemHolder(ctx, tx, itemID, participantID); err != nil {
 		return domain.Proposal{}, err

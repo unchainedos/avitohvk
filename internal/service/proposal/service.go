@@ -121,6 +121,9 @@ func (s *Service) createProposal(ctx context.Context, dealID, actorID, itemID st
 		if errors.Is(err, proposalrepo.ErrAlreadyProposed) {
 			return domain.Proposal{}, fmt.Errorf("%w: proposal already exists for this deal", statusErrors.ErrConflict)
 		}
+		if errors.Is(err, proposalrepo.ErrDealFull) {
+			return domain.Proposal{}, fmt.Errorf("%w: deal already has enough participants", statusErrors.ErrConflict)
+		}
 		return domain.Proposal{}, err
 	}
 	return p, nil
