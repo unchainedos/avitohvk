@@ -14,7 +14,7 @@ import (
 	"avitohvk/internal/transport/handler/chown"
 	"avitohvk/internal/transport/handler/deal"
 	"avitohvk/internal/transport/handler/item"
-	"avitohvk/internal/transport/handler/props"
+	_ "avitohvk/internal/transport/handler/props"
 	"avitohvk/internal/transport/handler/search"
 	"avitohvk/internal/transport/handler/user"
 	"avitohvk/internal/transport/handler/users"
@@ -66,7 +66,7 @@ func main() {
 			chown.New(),
 			deal.New(),
 			userHandler,
-			props.New(),
+			//props.New(),
 			router.RegistratorFunc(itemHandler.RegisterProtectedRoutes),
 			router.RegistratorFunc(wishHandler.RegisterProtectedRoutes),
 			router.RegistratorFunc(usersHandler.RegisterProtectedRoutes),
