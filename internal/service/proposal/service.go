@@ -85,8 +85,8 @@ func (s *Service) CreateProposal(ctx context.Context, actorID, dealID string, re
 	if err != nil {
 		return domain.Proposal{}, err
 	}
-	if d.Status != domain.DealStatusPending {
-		return domain.Proposal{}, fmt.Errorf("%w: deal is not open for new proposals", statusErrors.ErrConflict)
+	if err := s.ensureDealOpen(ctx, d); err != nil {
+		return domain.Proposal{}, err
 	}
 
 	count, err := s.proposals.CountForDeal(ctx, dealID)
@@ -205,8 +205,8 @@ func (s *Service) Approve(ctx context.Context, actorID, dealID string) (domain.P
 	if err != nil {
 		return domain.Proposal{}, err
 	}
-	if d.Status != domain.DealStatusPending {
-		return domain.Proposal{}, fmt.Errorf("%w: deal is not open", statusErrors.ErrConflict)
+	if err := s.ensureDealOpen(ctx, d); err != nil {
+		return domain.Proposal{}, err
 	}
 
 	p, err := s.proposals.SetStatus(ctx, dealID, actorID, domain.ProposalStatusAccepted)
@@ -231,6 +231,19 @@ func (s *Service) Approve(ctx context.Context, actorID, dealID string) (domain.P
 	}
 
 	return p, nil
+}
+
+func (s *Service) ensureDealOpen(ctx context.Context, d domain.Deal) error {
+	if d.Status != domain.DealStatusPending {
+		return fmt.Errorf("%w: deal is not open", statusErrors.ErrConflict)
+	}
+	if !d.DeadlineAt.After(time.Now()) {
+		if _, err := s.deals.UpdateStatus(ctx, d.ID, domain.DealStatusCancelled); err != nil {
+			return err
+		}
+		return fmt.Errorf("%w: deal deadline has passed", statusErrors.ErrConflict)
+	}
+	return nil
 }
 
 func validateOffer(itemID string, quantity float64) error {
