@@ -114,6 +114,9 @@ func (s *Service) createProposal(ctx context.Context, dealID, actorID, itemID st
 		if errors.Is(err, proposalrepo.ErrChainClosed) {
 			return domain.Proposal{}, fmt.Errorf("%w: chain is already closed to new participants", statusErrors.ErrConflict)
 		}
+		if errors.Is(err, proposalrepo.ErrItemLocked) {
+			return domain.Proposal{}, fmt.Errorf("%w: item is locked by another confirmed deal", statusErrors.ErrConflict)
+		}
 		return domain.Proposal{}, err
 	}
 	return p, nil
@@ -151,6 +154,9 @@ func (s *Service) UpdateProposal(ctx context.Context, actorID, dealID string, up
 		}
 		if errors.Is(err, proposalrepo.ErrNotPending) {
 			return domain.Proposal{}, fmt.Errorf("%w: proposal is not pending", statusErrors.ErrConflict)
+		}
+		if errors.Is(err, proposalrepo.ErrItemLocked) {
+			return domain.Proposal{}, fmt.Errorf("%w: item is locked by another confirmed deal", statusErrors.ErrConflict)
 		}
 		return domain.Proposal{}, err
 	}

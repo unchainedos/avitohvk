@@ -23,6 +23,7 @@ var (
 	ErrChainClosed       = errors.New("chain is already closed to new participants")
 	ErrNotPending        = errors.New("proposal is not pending")
 	ErrOutOfOrder        = errors.New("recipient has not accepted yet")
+	ErrItemLocked        = errors.New("item is locked by another confirmed deal")
 )
 
 type Repository struct {
@@ -347,7 +348,7 @@ func (r *Repository) TryLockChain(ctx context.Context, dealID string) error {
 
 	const qLockItems = `
 		UPDATE items
-		SET is_locked = true
+		SET is_locked = true, locked_by_deal_id = $2::uuid
 		WHERE id IN (
 			SELECT t.item_id
 			FROM chain_deal_transactions cdt
@@ -355,7 +356,7 @@ func (r *Repository) TryLockChain(ctx context.Context, dealID string) error {
 			WHERE cdt.deal_id = $1::uuid
 		)
 	`
-	if _, err := tx.Exec(ctx, qLockItems, dealID); err != nil {
+	if _, err := tx.Exec(ctx, qLockItems, dealID, dealID); err != nil {
 		return err
 	}
 
@@ -394,7 +395,7 @@ func (r *Repository) TryLockChain(ctx context.Context, dealID string) error {
 func (r *Repository) UnlockAllForDeal(ctx context.Context, dealID string) error {
 	const q = `
 		UPDATE items
-		SET is_locked = false
+		SET is_locked = false, locked_by_deal_id = NULL
 		WHERE id IN (
 			SELECT t.item_id
 			FROM chain_deal_transactions cdt
@@ -457,10 +458,16 @@ func isApprovalAllowed(ctx context.Context, tx pgx.Tx, dealID, participantID str
 	return allowed, nil
 }
 
-func checkItemHolder(ctx context.Context, q rowQuerier, itemID, participantID string) error {
-	const query = `SELECT holder_id::text FROM items WHERE id = $1::uuid`
+func checkItemHolder(ctx context.Context, tx pgx.Tx, itemID, participantID string) error {
+	const query = `
+		SELECT holder_id::text, is_locked, locked_by_deal_id IS NOT NULL
+		FROM items
+		WHERE id = $1::uuid
+		FOR UPDATE
+	`
 	var holderID string
-	err := q.QueryRow(ctx, query, itemID).Scan(&holderID)
+	var isLocked, lockedByDeal bool
+	err := tx.QueryRow(ctx, query, itemID).Scan(&holderID, &isLocked, &lockedByDeal)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return ErrItemNotFound
 	}
@@ -469,6 +476,15 @@ func checkItemHolder(ctx context.Context, q rowQuerier, itemID, participantID st
 	}
 	if holderID != participantID {
 		return ErrNotItemHolder
+	}
+	if isLocked {
+		if lockedByDeal {
+			return ErrItemLocked
+		}
+		const qRelease = `UPDATE items SET is_locked = false WHERE id = $1::uuid`
+		if _, err := tx.Exec(ctx, qRelease, itemID); err != nil {
+			return err
+		}
 	}
 	return nil
 }
