@@ -28,11 +28,14 @@ func New(service UserService) *UserHandler {
 	return &UserHandler{service: service}
 }
 
-func (h *UserHandler) RegisterRoutes(r chi.Router) {
+func (h *UserHandler) RegisterPublicRoutes(r chi.Router) {
+	r.Get("/user/{user_id}", h.Get)
 	r.Post("/user", h.Create)
-	r.Get("/user", h.Get)
-	r.Patch("/user", h.Update)
-	r.Delete("/user", h.Delete)
+}
+
+func (h *UserHandler) RegisterProtectedRoutes(r chi.Router) {
+	r.Patch("/user/{user_id}", h.Update)
+	r.Delete("/user/{user_id}", h.Delete)
 	r.Post("/user/add", h.AddItem)
 }
 
@@ -51,11 +54,12 @@ func (h *UserHandler) Create(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *UserHandler) Get(w http.ResponseWriter, r *http.Request) {
-	userID, ok := middleware.UserIDFromContext(r.Context())
-	if !ok {
-		utilhttp.WriteError(w, statusErrors.ErrUnauthorized)
+	userID := chi.URLParam(r, "user_id")
+	if userID == "" {
+		utilhttp.WriteError(w, statusErrors.ErrBadRequest)
 		return
 	}
+
 	u, err := h.service.Get(r.Context(), userID)
 	if err != nil {
 		utilhttp.WriteError(w, err)
@@ -65,9 +69,14 @@ func (h *UserHandler) Get(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *UserHandler) Update(w http.ResponseWriter, r *http.Request) {
-	userID, ok := middleware.UserIDFromContext(r.Context())
+	actorID, ok := middleware.UserIDFromContext(r.Context())
 	if !ok {
 		utilhttp.WriteError(w, statusErrors.ErrUnauthorized)
+		return
+	}
+	userID := chi.URLParam(r, "user_id")
+	if userID == "" {
+		utilhttp.WriteError(w, statusErrors.ErrBadRequest)
 		return
 	}
 	req, err := utilhttp.ReadFromJSON[dto.UpdateUserRequest](r)
@@ -77,7 +86,7 @@ func (h *UserHandler) Update(w http.ResponseWriter, r *http.Request) {
 	}
 	u, err := h.service.Update(
 		r.Context(),
-		userID,
+		actorID,
 		userID,
 		req.Username,
 		req.Password,
@@ -93,12 +102,17 @@ func (h *UserHandler) Update(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *UserHandler) Delete(w http.ResponseWriter, r *http.Request) {
-	userID, ok := middleware.UserIDFromContext(r.Context())
+	actorID, ok := middleware.UserIDFromContext(r.Context())
 	if !ok {
 		utilhttp.WriteError(w, statusErrors.ErrUnauthorized)
 		return
 	}
-	if err := h.service.Delete(r.Context(), userID, userID); err != nil {
+	userID := chi.URLParam(r, "user_id")
+	if userID == "" {
+		utilhttp.WriteError(w, statusErrors.ErrBadRequest)
+		return
+	}
+	if err := h.service.Delete(r.Context(), actorID, userID); err != nil {
 		utilhttp.WriteError(w, err)
 		return
 	}
