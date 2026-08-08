@@ -25,13 +25,15 @@ func NewRepository(pool *pgxpool.Pool) *Repository {
 	return &Repository{pool: pool}
 }
 
-func (r *Repository) Create(ctx context.Context, rootItemID, creatorID string, participants int, deadlineAt time.Time) (domain.Deal, error) {
+func (r *Repository) Create(ctx context.Context, rootItemID, creatorID string, participants int, negotiationWindow time.Duration) (domain.Deal, error) {
 	const q = `
-		INSERT INTO chain_deals (root_item_id, creator_id, participants, deadline_at)
+		INSERT INTO chain_deals (root_item_id, creator_id, participants, negotiation_window_seconds)
 		VALUES ($1::uuid, $2::uuid, $3, $4)
-		RETURNING id::text, root_item_id::text, creator_id::text, status, participants, deadline_at, created_at, updated_at
+		RETURNING id::text, root_item_id::text, creator_id::text, status, participants,
+		          negotiation_window_seconds, deadline_at, created_at, updated_at
 	`
-	d, err := r.scanDeal(r.pool.QueryRow(ctx, q, rootItemID, creatorID, participants, deadlineAt))
+	seconds := int64(negotiationWindow.Seconds())
+	d, err := r.scanDeal(r.pool.QueryRow(ctx, q, rootItemID, creatorID, participants, seconds))
 	if err != nil {
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) && pgErr.Code == "23503" {
@@ -44,7 +46,8 @@ func (r *Repository) Create(ctx context.Context, rootItemID, creatorID string, p
 
 func (r *Repository) GetByID(ctx context.Context, id string) (domain.Deal, error) {
 	const q = `
-		SELECT id::text, root_item_id::text, creator_id::text, status, participants, deadline_at, created_at, updated_at
+		SELECT id::text, root_item_id::text, creator_id::text, status, participants,
+		       negotiation_window_seconds, deadline_at, created_at, updated_at
 		FROM chain_deals
 		WHERE id = $1::uuid
 	`
@@ -56,16 +59,18 @@ func (r *Repository) UpdateStatus(ctx context.Context, id string, status domain.
 		UPDATE chain_deals
 		SET status = $2
 		WHERE id = $1::uuid
-		RETURNING id::text, root_item_id::text, creator_id::text, status, participants, deadline_at, created_at, updated_at
+		RETURNING id::text, root_item_id::text, creator_id::text, status, participants,
+		          negotiation_window_seconds, deadline_at, created_at, updated_at
 	`
 	return r.scanDeal(r.pool.QueryRow(ctx, q, id, status))
 }
 
 func (r *Repository) scanDeal(row pgx.Row) (domain.Deal, error) {
 	var d domain.Deal
+	var seconds int64
 	err := row.Scan(
 		&d.ID, &d.RootItemID, &d.CreatorID, &d.Status, &d.Participants,
-		&d.DeadlineAt, &d.CreatedAt, &d.UpdatedAt,
+		&seconds, &d.DeadlineAt, &d.CreatedAt, &d.UpdatedAt,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return domain.Deal{}, ErrNotFound
@@ -73,5 +78,6 @@ func (r *Repository) scanDeal(row pgx.Row) (domain.Deal, error) {
 	if err != nil {
 		return domain.Deal{}, err
 	}
+	d.NegotiationWindow = time.Duration(seconds) * time.Second
 	return d, nil
 }

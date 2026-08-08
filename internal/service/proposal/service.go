@@ -13,10 +13,13 @@ import (
 	proposalrepo "avitohvk/internal/repository/proposal"
 )
 
-const minParticipants = 2
+const (
+	minParticipants          = 2
+	defaultNegotiationWindow = 24 * time.Hour
+)
 
 type DealRepository interface {
-	Create(ctx context.Context, rootItemID, creatorID string, participants int, deadlineAt time.Time) (domain.Deal, error)
+	Create(ctx context.Context, rootItemID, creatorID string, participants int, negotiationWindow time.Duration) (domain.Deal, error)
 	GetByID(ctx context.Context, id string) (domain.Deal, error)
 	UpdateStatus(ctx context.Context, id string, status domain.DealStatus) (domain.Deal, error)
 }
@@ -63,11 +66,7 @@ func (s *Service) CreateDeal(ctx context.Context, actorID string, req dto.Create
 	if req.Participants < minParticipants {
 		return domain.Proposal{}, fmt.Errorf("%w: participants must be at least %d", statusErrors.ErrBadRequest, minParticipants)
 	}
-	if !req.DeadlineAt.After(time.Now()) {
-		return domain.Proposal{}, fmt.Errorf("%w: deadline_at must be in the future", statusErrors.ErrBadRequest)
-	}
-
-	d, err := s.deals.Create(ctx, req.RootItemID, actorID, req.Participants, req.DeadlineAt)
+	d, err := s.deals.Create(ctx, req.RootItemID, actorID, req.Participants, defaultNegotiationWindow)
 	if err != nil {
 		if errors.Is(err, dealrepo.ErrRootItemNotFound) {
 			return domain.Proposal{}, fmt.Errorf("%w: root item not found", statusErrors.ErrNotFound)
@@ -243,7 +242,7 @@ func (s *Service) ensureDealOpen(ctx context.Context, d domain.Deal) error {
 	if d.Status != domain.DealStatusPending {
 		return fmt.Errorf("%w: deal is not open", statusErrors.ErrConflict)
 	}
-	if !d.DeadlineAt.After(time.Now()) {
+	if d.DeadlineAt != nil && !d.DeadlineAt.After(time.Now()) {
 		if _, err := s.deals.UpdateStatus(ctx, d.ID, domain.DealStatusCancelled); err != nil {
 			return err
 		}

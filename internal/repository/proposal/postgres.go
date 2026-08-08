@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"avitohvk/internal/domain"
 
@@ -38,9 +39,17 @@ func (r *Repository) Create(ctx context.Context, dealID, participantID, itemID s
 	}
 	defer tx.Rollback(ctx)
 
-	const qDeal = `SELECT participants FROM chain_deals WHERE id = $1::uuid FOR UPDATE`
+	const qDeal = `
+		SELECT participants, (root_item_id = $2::uuid), negotiation_window_seconds, deadline_at
+		FROM chain_deals
+		WHERE id = $1::uuid
+		FOR UPDATE
+	`
 	var participants int
-	if err := tx.QueryRow(ctx, qDeal, dealID).Scan(&participants); err != nil {
+	var isRootItem bool
+	var negotiationWindowSeconds int64
+	var deadlineAt *time.Time
+	if err := tx.QueryRow(ctx, qDeal, dealID, itemID).Scan(&participants, &isRootItem, &negotiationWindowSeconds, &deadlineAt); err != nil {
 		return domain.Proposal{}, err
 	}
 
@@ -51,6 +60,14 @@ func (r *Repository) Create(ctx context.Context, dealID, participantID, itemID s
 	}
 	if count >= participants {
 		return domain.Proposal{}, ErrDealFull
+	}
+
+	if isRootItem && deadlineAt == nil {
+		deadline := time.Now().Add(time.Duration(negotiationWindowSeconds) * time.Second)
+		const qStart = `UPDATE chain_deals SET deadline_at = $2 WHERE id = $1::uuid`
+		if _, err := tx.Exec(ctx, qStart, dealID, deadline); err != nil {
+			return domain.Proposal{}, err
+		}
 	}
 
 	if err := checkItemHolder(ctx, tx, itemID, participantID); err != nil {

@@ -45,12 +45,13 @@ func (h *DealHandler) Get(w http.ResponseWriter, r *http.Request) {
 
 func toDealResponse(d domain.Deal) dto.DealResponse {
 	return dto.DealResponse{
-		ID:           d.ID,
-		RootItemID:   d.RootItemID,
-		CreatorID:    d.CreatorID,
-		Status:       string(d.Status),
-		Participants: d.Participants,
-		DeadlineAt:   d.DeadlineAt,
-		CreatedAt:    d.CreatedAt,
+		ID:                       d.ID,
+		RootItemID:               d.RootItemID,
+		CreatorID:                d.CreatorID,
+		Status:                   string(d.Status),
+		Participants:             d.Participants,
+		NegotiationWindowSeconds: int64(d.NegotiationWindow.Seconds()),
+		DeadlineAt:               d.DeadlineAt,
+		CreatedAt:                d.CreatedAt,
 	}
 }
