@@ -2,13 +2,18 @@ package proposal
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"time"
 
 	"avitohvk/internal/domain"
 	"avitohvk/internal/dto"
-	// dealrepo "avitohvk/internal/repository/deal"
-	// proposalrepo "avitohvk/internal/repository/proposal"
+	statusErrors "avitohvk/internal/errors"
+	dealrepo "avitohvk/internal/repository/deal"
+	proposalrepo "avitohvk/internal/repository/proposal"
 )
+
+const defaultParticipants = 2
 
 type DealRepository interface {
 	Create(ctx context.Context, rootItemID string, participants int, deadlineAt time.Time) (domain.Deal, error)
@@ -35,41 +40,150 @@ func NewService(deals DealRepository, proposals ProposalRepository) *Service {
 }
 
 func (s *Service) GetByID(ctx context.Context, id string) (domain.Deal, error) {
-	return domain.Deal{}, nil
+	d, err := s.deals.GetByID(ctx, id)
+	if err != nil {
+		if errors.Is(err, dealrepo.ErrNotFound) {
+			return domain.Deal{}, statusErrors.ErrNotFound
+		}
+		return domain.Deal{}, err
+	}
+	return d, nil
 }
 
 func (s *Service) CreateDeal(ctx context.Context, actorID string, req dto.CreateDealRequest) (domain.Proposal, error) {
-	return domain.Proposal{}, nil
+	if err := validateOffer(req.ItemID, req.Quantity); err != nil {
+		return domain.Proposal{}, err
+	}
+	if req.RootItemID == "" {
+		return domain.Proposal{}, fmt.Errorf("%w: root_item_id required", statusErrors.ErrBadRequest)
+	}
+	if !req.DeadlineAt.After(time.Now()) {
+		return domain.Proposal{}, fmt.Errorf("%w: deadline_at must be in the future", statusErrors.ErrBadRequest)
+	}
+
+	d, err := s.deals.Create(ctx, req.RootItemID, defaultParticipants, req.DeadlineAt)
+	if err != nil {
+		if errors.Is(err, dealrepo.ErrRootItemNotFound) {
+			return domain.Proposal{}, fmt.Errorf("%w: root item not found", statusErrors.ErrNotFound)
+		}
+		return domain.Proposal{}, err
+	}
+
+	return s.createProposal(ctx, d.ID, actorID, req.ItemID, req.Quantity)
 }
 
 func (s *Service) CreateProposal(ctx context.Context, actorID, dealID string, req dto.CreateProposalRequest) (domain.Proposal, error) {
-	return domain.Proposal{}, nil
+	if err := validateOffer(req.ItemID, req.Quantity); err != nil {
+		return domain.Proposal{}, err
+	}
+
+	d, err := s.GetByID(ctx, dealID)
+	if err != nil {
+		return domain.Proposal{}, err
+	}
+	if d.Status != domain.DealStatusPending {
+		return domain.Proposal{}, fmt.Errorf("%w: deal is not open for new proposals", statusErrors.ErrConflict)
+	}
+
+	if _, err := s.proposals.GetByDealAndParticipant(ctx, dealID, actorID); err == nil {
+		return domain.Proposal{}, fmt.Errorf("%w: proposal already exists for this deal", statusErrors.ErrConflict)
+	} else if !errors.Is(err, proposalrepo.ErrNotFound) {
+		return domain.Proposal{}, err
+	}
+
+	return s.createProposal(ctx, dealID, actorID, req.ItemID, req.Quantity)
 }
 
 func (s *Service) createProposal(ctx context.Context, dealID, actorID, itemID string, quantity float64) (domain.Proposal, error) {
-	return domain.Proposal{}, nil
+	p, err := s.proposals.Create(ctx, dealID, actorID, itemID, quantity)
+	if err != nil {
+		if errors.Is(err, proposalrepo.ErrItemNotFound) {
+			return domain.Proposal{}, fmt.Errorf("%w: item not found", statusErrors.ErrNotFound)
+		}
+		return domain.Proposal{}, err
+	}
+	return p, nil
 }
 
 func (s *Service) GetProposal(ctx context.Context, actorID, dealID string) (domain.Proposal, error) {
-	return domain.Proposal{}, nil
+	p, err := s.proposals.GetByDealAndParticipant(ctx, dealID, actorID)
+	if err != nil {
+		if errors.Is(err, proposalrepo.ErrNotFound) {
+			return domain.Proposal{}, statusErrors.ErrNotFound
+		}
+		return domain.Proposal{}, err
+	}
+	return p, nil
 }
 
 func (s *Service) UpdateProposal(ctx context.Context, actorID, dealID string, upd domain.ProposalUpdate) (domain.Proposal, error) {
-	return domain.Proposal{}, nil
+	if upd.Quantity != nil && *upd.Quantity <= 0 {
+		return domain.Proposal{}, fmt.Errorf("%w: quantity must be positive", statusErrors.ErrBadRequest)
+	}
+
+	p, err := s.proposals.Update(ctx, dealID, actorID, upd)
+	if err != nil {
+		if errors.Is(err, proposalrepo.ErrNotFound) {
+			return domain.Proposal{}, statusErrors.ErrNotFound
+		}
+		if errors.Is(err, proposalrepo.ErrItemNotFound) {
+			return domain.Proposal{}, fmt.Errorf("%w: item not found", statusErrors.ErrNotFound)
+		}
+		return domain.Proposal{}, err
+	}
+	return p, nil
 }
 
 func (s *Service) WithdrawProposal(ctx context.Context, actorID, dealID string) error {
+	_, err := s.proposals.SetStatus(ctx, dealID, actorID, domain.ProposalStatusDeclined)
+	if err != nil {
+		if errors.Is(err, proposalrepo.ErrNotFound) {
+			return statusErrors.ErrNotFound
+		}
+		return err
+	}
 	return nil
 }
 
 func (s *Service) ListForUser(ctx context.Context, actorID, userID string) ([]domain.Proposal, error) {
-	return []domain.Proposal{}, nil
+	if actorID != userID {
+		return nil, statusErrors.ErrUnauthorized
+	}
+	list, err := s.proposals.ListForUser(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	return list, nil
 }
 
 func (s *Service) Approve(ctx context.Context, actorID, dealID string) (domain.Proposal, error) {
-	return domain.Proposal{}, nil
+	p, err := s.proposals.SetStatus(ctx, dealID, actorID, domain.ProposalStatusAccepted)
+	if err != nil {
+		if errors.Is(err, proposalrepo.ErrNotFound) {
+			return domain.Proposal{}, statusErrors.ErrNotFound
+		}
+		return domain.Proposal{}, err
+	}
+
+	allAccepted, err := s.proposals.AllAccepted(ctx, dealID)
+	if err != nil {
+		return domain.Proposal{}, err
+	}
+	if allAccepted {
+		if _, err := s.deals.UpdateStatus(ctx, dealID, domain.DealStatusConfirmed); err != nil {
+			return domain.Proposal{}, err
+		}
+	}
+
+	return p, nil
 }
 
 func validateOffer(itemID string, quantity float64) error {
+	if itemID == "" {
+		return fmt.Errorf("%w: item_id required", statusErrors.ErrBadRequest)
+	}
+	if quantity <= 0 {
+		return fmt.Errorf("%w: quantity must be positive", statusErrors.ErrBadRequest)
+	}
 	return nil
 }
