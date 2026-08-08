@@ -159,16 +159,30 @@ func (s *Service) UpdateProposal(ctx context.Context, actorID, dealID string, up
 		if errors.Is(err, proposalrepo.ErrNotItemHolder) {
 			return domain.Proposal{}, fmt.Errorf("%w: you do not hold this item", statusErrors.ErrConflict)
 		}
+		if errors.Is(err, proposalrepo.ErrNotPending) {
+			return domain.Proposal{}, fmt.Errorf("%w: proposal is not pending", statusErrors.ErrConflict)
+		}
 		return domain.Proposal{}, err
 	}
 	return p, nil
 }
 
 func (s *Service) WithdrawProposal(ctx context.Context, actorID, dealID string) error {
-	_, err := s.proposals.SetStatus(ctx, dealID, actorID, domain.ProposalStatusDeclined)
+	d, err := s.GetByID(ctx, dealID)
+	if err != nil {
+		return err
+	}
+	if d.Status != domain.DealStatusPending {
+		return fmt.Errorf("%w: deal is not open", statusErrors.ErrConflict)
+	}
+
+	_, err = s.proposals.SetStatus(ctx, dealID, actorID, domain.ProposalStatusDeclined)
 	if err != nil {
 		if errors.Is(err, proposalrepo.ErrNotFound) {
 			return statusErrors.ErrNotFound
+		}
+		if errors.Is(err, proposalrepo.ErrNotPending) {
+			return fmt.Errorf("%w: proposal is not pending", statusErrors.ErrConflict)
 		}
 		return err
 	}
@@ -187,10 +201,21 @@ func (s *Service) ListForUser(ctx context.Context, actorID, userID string) ([]do
 }
 
 func (s *Service) Approve(ctx context.Context, actorID, dealID string) (domain.Proposal, error) {
+	d, err := s.GetByID(ctx, dealID)
+	if err != nil {
+		return domain.Proposal{}, err
+	}
+	if d.Status != domain.DealStatusPending {
+		return domain.Proposal{}, fmt.Errorf("%w: deal is not open", statusErrors.ErrConflict)
+	}
+
 	p, err := s.proposals.SetStatus(ctx, dealID, actorID, domain.ProposalStatusAccepted)
 	if err != nil {
 		if errors.Is(err, proposalrepo.ErrNotFound) {
 			return domain.Proposal{}, statusErrors.ErrNotFound
+		}
+		if errors.Is(err, proposalrepo.ErrNotPending) {
+			return domain.Proposal{}, fmt.Errorf("%w: proposal is not pending", statusErrors.ErrConflict)
 		}
 		return domain.Proposal{}, err
 	}

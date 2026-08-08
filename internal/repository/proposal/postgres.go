@@ -20,6 +20,7 @@ var (
 	ErrNotItemHolder     = errors.New("participant does not hold this item")
 	ErrAlreadyProposed   = errors.New("proposal already exists for this deal")
 	ErrDealFull          = errors.New("deal already has enough participants")
+	ErrNotPending        = errors.New("proposal is not pending")
 )
 
 type Repository struct {
@@ -114,14 +115,24 @@ func (r *Repository) GetByDealAndParticipant(ctx context.Context, dealID, partic
 }
 
 func (r *Repository) Update(ctx context.Context, dealID, participantID string, upd domain.ProposalUpdate) (domain.Proposal, error) {
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return domain.Proposal{}, err
+	}
+	defer tx.Rollback(ctx)
+
+	if err := lockPending(ctx, tx, dealID, participantID); err != nil {
+		return domain.Proposal{}, err
+	}
+
 	sets := make([]string, 0, 3)
 	args := []any{dealID, participantID}
 	n := 3
 	if upd.ItemID != nil {
-		if err := checkItemHolder(ctx, r.pool, *upd.ItemID, participantID); err != nil {
+		if err := checkItemHolder(ctx, tx, *upd.ItemID, participantID); err != nil {
 			return domain.Proposal{}, err
 		}
-		toUserID, err := resolveRecipient(ctx, r.pool, *upd.ItemID, participantID)
+		toUserID, err := resolveRecipient(ctx, tx, *upd.ItemID, participantID)
 		if err != nil {
 			return domain.Proposal{}, err
 		}
@@ -138,6 +149,9 @@ func (r *Repository) Update(ctx context.Context, dealID, participantID string, u
 		n++
 	}
 	if len(sets) == 0 {
+		if err := tx.Commit(ctx); err != nil {
+			return domain.Proposal{}, err
+		}
 		return r.GetByDealAndParticipant(ctx, dealID, participantID)
 	}
 
@@ -152,18 +166,27 @@ func (r *Repository) Update(ctx context.Context, dealID, participantID string, u
 		          t.item_id::text, t.to_user::text, t.quantity, cdt.status, cdt.updated_at
 	`, strings.Join(sets, ", "))
 
-	p, err := r.scanProposal(r.pool.QueryRow(ctx, q, args...))
+	p, err := r.scanProposal(tx.QueryRow(ctx, q, args...))
 	if err != nil {
-		var pgErr *pgconn.PgError
-		if errors.As(err, &pgErr) && pgErr.Code == "23503" {
-			return domain.Proposal{}, ErrItemNotFound
-		}
+		return domain.Proposal{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
 		return domain.Proposal{}, err
 	}
 	return p, nil
 }
 
 func (r *Repository) SetStatus(ctx context.Context, dealID, participantID string, status domain.ProposalStatus) (domain.Proposal, error) {
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return domain.Proposal{}, err
+	}
+	defer tx.Rollback(ctx)
+
+	if err := lockPending(ctx, tx, dealID, participantID); err != nil {
+		return domain.Proposal{}, err
+	}
+
 	const q = `
 		UPDATE chain_deal_transactions cdt
 		SET status = $3
@@ -174,7 +197,14 @@ func (r *Repository) SetStatus(ctx context.Context, dealID, participantID string
 		RETURNING cdt.deal_id::text, cdt.transaction_id::text, cdt.participant_id::text,
 		          t.item_id::text, t.to_user::text, t.quantity, cdt.status, cdt.updated_at
 	`
-	return r.scanProposal(r.pool.QueryRow(ctx, q, dealID, participantID, status))
+	p, err := r.scanProposal(tx.QueryRow(ctx, q, dealID, participantID, status))
+	if err != nil {
+		return domain.Proposal{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return domain.Proposal{}, err
+	}
+	return p, nil
 }
 
 func (r *Repository) ListForUser(ctx context.Context, userID string) ([]domain.Proposal, error) {
@@ -236,6 +266,27 @@ func (r *Repository) CountForDeal(ctx context.Context, dealID string) (int, erro
 
 type rowQuerier interface {
 	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
+}
+
+func lockPending(ctx context.Context, tx pgx.Tx, dealID, participantID string) error {
+	const query = `
+		SELECT status
+		FROM chain_deal_transactions
+		WHERE deal_id = $1::uuid AND participant_id = $2::uuid
+		FOR UPDATE
+	`
+	var current domain.ProposalStatus
+	err := tx.QueryRow(ctx, query, dealID, participantID).Scan(&current)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return ErrNotFound
+	}
+	if err != nil {
+		return err
+	}
+	if current != domain.ProposalStatusPending {
+		return ErrNotPending
+	}
+	return nil
 }
 
 func checkItemHolder(ctx context.Context, q rowQuerier, itemID, participantID string) error {
