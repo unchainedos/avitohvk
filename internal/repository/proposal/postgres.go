@@ -264,6 +264,128 @@ func (r *Repository) CountForDeal(ctx context.Context, dealID string) (int, erro
 	return count, nil
 }
 
+// TryLockChain locks every item currently offered in the deal's chain, but only once both
+// the deal creator's own proposal and the proposal offering the root item are ACCEPTED.
+// Before that point items stay unlocked and can be freely offered in other deals. Once locked,
+// any other still-PENDING deal referencing one of the now-locked items is cancelled.
+func (r *Repository) TryLockChain(ctx context.Context, dealID string) error {
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+
+	const qDeal = `
+		SELECT creator_id::text, root_item_id::text
+		FROM chain_deals
+		WHERE id = $1::uuid
+		FOR UPDATE
+	`
+	var creatorID, rootItemID string
+	if err := tx.QueryRow(ctx, qDeal, dealID).Scan(&creatorID, &rootItemID); err != nil {
+		return err
+	}
+
+	const qAccepted = `
+		SELECT EXISTS (
+			SELECT 1 FROM chain_deal_transactions
+			WHERE deal_id = $1::uuid AND participant_id = $2::uuid AND status = 'ACCEPTED'
+		)
+	`
+	var creatorAccepted bool
+	if err := tx.QueryRow(ctx, qAccepted, dealID, creatorID).Scan(&creatorAccepted); err != nil {
+		return err
+	}
+	if !creatorAccepted {
+		return tx.Commit(ctx)
+	}
+
+	const qRootAccepted = `
+		SELECT EXISTS (
+			SELECT 1
+			FROM chain_deal_transactions cdt
+			JOIN transactions t ON t.id = cdt.transaction_id
+			WHERE cdt.deal_id = $1::uuid AND t.item_id = $2::uuid AND cdt.status = 'ACCEPTED'
+		)
+	`
+	var rootAccepted bool
+	if err := tx.QueryRow(ctx, qRootAccepted, dealID, rootItemID).Scan(&rootAccepted); err != nil {
+		return err
+	}
+	if !rootAccepted {
+		return tx.Commit(ctx)
+	}
+
+	const qAlreadyLocked = `SELECT is_locked FROM items WHERE id = $1::uuid`
+	var alreadyLocked bool
+	if err := tx.QueryRow(ctx, qAlreadyLocked, rootItemID).Scan(&alreadyLocked); err != nil {
+		return err
+	}
+	if alreadyLocked {
+		return tx.Commit(ctx)
+	}
+
+	const qLockItems = `
+		UPDATE items
+		SET is_locked = true
+		WHERE id IN (
+			SELECT t.item_id
+			FROM chain_deal_transactions cdt
+			JOIN transactions t ON t.id = cdt.transaction_id
+			WHERE cdt.deal_id = $1::uuid
+		)
+	`
+	if _, err := tx.Exec(ctx, qLockItems, dealID); err != nil {
+		return err
+	}
+
+	const qCancelCompeting = `
+		UPDATE chain_deals
+		SET status = 'CANCELLED'
+		WHERE status = 'PENDING'
+		  AND id <> $1::uuid
+		  AND (
+		    root_item_id IN (
+		        SELECT t.item_id
+		        FROM chain_deal_transactions cdt
+		        JOIN transactions t ON t.id = cdt.transaction_id
+		        WHERE cdt.deal_id = $1::uuid
+		    )
+		    OR id IN (
+		        SELECT cdt2.deal_id
+		        FROM chain_deal_transactions cdt2
+		        JOIN transactions t2 ON t2.id = cdt2.transaction_id
+		        WHERE t2.item_id IN (
+		            SELECT t.item_id
+		            FROM chain_deal_transactions cdt
+		            JOIN transactions t ON t.id = cdt.transaction_id
+		            WHERE cdt.deal_id = $1::uuid
+		        )
+		    )
+		  )
+	`
+	if _, err := tx.Exec(ctx, qCancelCompeting, dealID); err != nil {
+		return err
+	}
+
+	return tx.Commit(ctx)
+}
+
+func (r *Repository) UnlockAllForDeal(ctx context.Context, dealID string) error {
+	const q = `
+		UPDATE items
+		SET is_locked = false
+		WHERE id IN (
+			SELECT t.item_id
+			FROM chain_deal_transactions cdt
+			JOIN transactions t ON t.id = cdt.transaction_id
+			WHERE cdt.deal_id = $1::uuid
+		)
+	`
+	_, err := r.pool.Exec(ctx, q, dealID)
+	return err
+}
+
 type rowQuerier interface {
 	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
 }

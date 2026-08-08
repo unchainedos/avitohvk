@@ -47,6 +47,7 @@ func toDealResponse(d domain.Deal) dto.DealResponse {
 	return dto.DealResponse{
 		ID:           d.ID,
 		RootItemID:   d.RootItemID,
+		CreatorID:    d.CreatorID,
 		Status:       string(d.Status),
 		Participants: d.Participants,
 		DeadlineAt:   d.DeadlineAt,

@@ -16,7 +16,7 @@ import (
 const minParticipants = 2
 
 type DealRepository interface {
-	Create(ctx context.Context, rootItemID string, participants int, deadlineAt time.Time) (domain.Deal, error)
+	Create(ctx context.Context, rootItemID, creatorID string, participants int, deadlineAt time.Time) (domain.Deal, error)
 	GetByID(ctx context.Context, id string) (domain.Deal, error)
 	UpdateStatus(ctx context.Context, id string, status domain.DealStatus) (domain.Deal, error)
 }
@@ -29,6 +29,8 @@ type ProposalRepository interface {
 	ListForUser(ctx context.Context, userID string) ([]domain.Proposal, error)
 	AllAccepted(ctx context.Context, dealID string) (bool, error)
 	CountForDeal(ctx context.Context, dealID string) (int, error)
+	TryLockChain(ctx context.Context, dealID string) error
+	UnlockAllForDeal(ctx context.Context, dealID string) error
 }
 
 type Service struct {
@@ -65,7 +67,7 @@ func (s *Service) CreateDeal(ctx context.Context, actorID string, req dto.Create
 		return domain.Proposal{}, fmt.Errorf("%w: deadline_at must be in the future", statusErrors.ErrBadRequest)
 	}
 
-	d, err := s.deals.Create(ctx, req.RootItemID, req.Participants, req.DeadlineAt)
+	d, err := s.deals.Create(ctx, req.RootItemID, actorID, req.Participants, req.DeadlineAt)
 	if err != nil {
 		if errors.Is(err, dealrepo.ErrRootItemNotFound) {
 			return domain.Proposal{}, fmt.Errorf("%w: root item not found", statusErrors.ErrNotFound)
@@ -220,6 +222,10 @@ func (s *Service) Approve(ctx context.Context, actorID, dealID string) (domain.P
 		return domain.Proposal{}, err
 	}
 
+	if err := s.proposals.TryLockChain(ctx, dealID); err != nil {
+		return domain.Proposal{}, err
+	}
+
 	allAccepted, err := s.proposals.AllAccepted(ctx, dealID)
 	if err != nil {
 		return domain.Proposal{}, err
@@ -239,6 +245,9 @@ func (s *Service) ensureDealOpen(ctx context.Context, d domain.Deal) error {
 	}
 	if !d.DeadlineAt.After(time.Now()) {
 		if _, err := s.deals.UpdateStatus(ctx, d.ID, domain.DealStatusCancelled); err != nil {
+			return err
+		}
+		if err := s.proposals.UnlockAllForDeal(ctx, d.ID); err != nil {
 			return err
 		}
 		return fmt.Errorf("%w: deal deadline has passed", statusErrors.ErrConflict)

@@ -38,6 +38,7 @@ type ProposalListResponse struct {
 type DealResponse struct {
 	ID           string    `json:"id"`
 	RootItemID   string    `json:"root_item_id"`
+	CreatorID    string    `json:"creator_id"`
 	Status       string    `json:"status"`
 	Participants int       `json:"participants"`
 	DeadlineAt   time.Time `json:"deadline_at"`

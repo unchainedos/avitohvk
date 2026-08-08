@@ -14,6 +14,7 @@ const (
 type Deal struct {
 	ID           string
 	RootItemID   string
+	CreatorID    string
 	Status       DealStatus
 	Participants int
 	DeadlineAt   time.Time
