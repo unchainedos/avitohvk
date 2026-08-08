@@ -174,18 +174,21 @@ func (r *Repository) Update(ctx context.Context, dealID, participantID string, u
 		WHERE cdt.transaction_id = t.id
 		  AND cdt.deal_id = $1::uuid
 		  AND cdt.participant_id = $2::uuid
-		RETURNING cdt.deal_id::text, cdt.transaction_id::text, cdt.participant_id::text,
-		          t.item_id::text, t.to_user::text, t.quantity, cdt.status, cdt.updated_at
 	`, strings.Join(sets, ", "))
 
-	p, err := r.scanProposal(tx.QueryRow(ctx, q, args...))
-	if err != nil {
+	if _, err := tx.Exec(ctx, q, args...); err != nil {
 		return domain.Proposal{}, err
 	}
+
+	const qTouch = `UPDATE chain_deal_transactions SET updated_at = now() WHERE deal_id = $1::uuid AND participant_id = $2::uuid`
+	if _, err := tx.Exec(ctx, qTouch, dealID, participantID); err != nil {
+		return domain.Proposal{}, err
+	}
+
 	if err := tx.Commit(ctx); err != nil {
 		return domain.Proposal{}, err
 	}
-	return p, nil
+	return r.GetByDealAndParticipant(ctx, dealID, participantID)
 }
 
 func (r *Repository) SetStatus(ctx context.Context, dealID, participantID string, status domain.ProposalStatus) (domain.Proposal, error) {
