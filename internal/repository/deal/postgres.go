@@ -7,6 +7,8 @@ import (
 
 	"avitohvk/internal/domain"
 
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -24,13 +26,52 @@ func NewRepository(pool *pgxpool.Pool) *Repository {
 }
 
 func (r *Repository) Create(ctx context.Context, rootItemID string, participants int, deadlineAt time.Time) (domain.Deal, error) {
-	return domain.Deal{}, nil
+	const q = `
+		INSERT INTO chain_deals (root_item_id, participants, deadline_at)
+		VALUES ($1::uuid, $2, $3)
+		RETURNING id::text, root_item_id::text, status, participants, deadline_at, created_at, updated_at
+	`
+	d, err := r.scanDeal(r.pool.QueryRow(ctx, q, rootItemID, participants, deadlineAt))
+	if err != nil {
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "23503" {
+			return domain.Deal{}, ErrRootItemNotFound
+		}
+		return domain.Deal{}, err
+	}
+	return d, nil
 }
 
 func (r *Repository) GetByID(ctx context.Context, id string) (domain.Deal, error) {
-	return domain.Deal{}, nil
+	const q = `
+		SELECT id::text, root_item_id::text, status, participants, deadline_at, created_at, updated_at
+		FROM chain_deals
+		WHERE id = $1::uuid
+	`
+	return r.scanDeal(r.pool.QueryRow(ctx, q, id))
 }
 
 func (r *Repository) UpdateStatus(ctx context.Context, id string, status domain.DealStatus) (domain.Deal, error) {
-	return domain.Deal{}, nil
+	const q = `
+		UPDATE chain_deals
+		SET status = $2
+		WHERE id = $1::uuid
+		RETURNING id::text, root_item_id::text, status, participants, deadline_at, created_at, updated_at
+	`
+	return r.scanDeal(r.pool.QueryRow(ctx, q, id, status))
+}
+
+func (r *Repository) scanDeal(row pgx.Row) (domain.Deal, error) {
+	var d domain.Deal
+	err := row.Scan(
+		&d.ID, &d.RootItemID, &d.Status, &d.Participants,
+		&d.DeadlineAt, &d.CreatedAt, &d.UpdatedAt,
+	)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return domain.Deal{}, ErrNotFound
+	}
+	if err != nil {
+		return domain.Deal{}, err
+	}
+	return d, nil
 }
