@@ -31,6 +31,8 @@ type ProposalRepository interface {
 	AllAccepted(ctx context.Context, dealID string) (bool, error)
 	TryLockChain(ctx context.Context, dealID string) error
 	UnlockAllForDeal(ctx context.Context, dealID string) error
+	DeclineAllExcept(ctx context.Context, dealID, actorID string) error
+	DeclineAllForDeal(ctx context.Context, dealID string) error
 	ListTransfers(ctx context.Context, dealID string) ([]domain.ItemTransfer, error)
 }
 
@@ -81,6 +83,12 @@ func (s *Service) CreateProposal(ctx context.Context, actorID, dealID string, re
 	if err := validateOffer(req.ItemID, req.Quantity); err != nil {
 		return domain.Proposal{}, err
 	}
+
+	release, err := s.deals.LockDeal(ctx, dealID)
+	if err != nil {
+		return domain.Proposal{}, err
+	}
+	defer release(context.WithoutCancel(ctx))
 
 	d, err := s.GetByID(ctx, dealID)
 	if err != nil {
@@ -199,6 +207,9 @@ func (s *Service) WithdrawProposal(ctx context.Context, actorID, dealID string) 
 	if _, err := s.deals.UpdateStatus(ctx, dealID, domain.DealStatusCancelled); err != nil {
 		return err
 	}
+	if err := s.proposals.DeclineAllExcept(ctx, dealID, actorID); err != nil {
+		return err
+	}
 	if err := s.proposals.UnlockAllForDeal(ctx, dealID); err != nil {
 		return err
 	}
@@ -285,6 +296,9 @@ func (s *Service) ensureDealOpen(ctx context.Context, d domain.Deal) error {
 	}
 	if d.DeadlineAt != nil && !d.DeadlineAt.After(time.Now()) {
 		if _, err := s.deals.UpdateStatus(ctx, d.ID, domain.DealStatusCancelled); err != nil {
+			return err
+		}
+		if err := s.proposals.DeclineAllForDeal(ctx, d.ID); err != nil {
 			return err
 		}
 		if err := s.proposals.UnlockAllForDeal(ctx, d.ID); err != nil {

@@ -430,6 +430,26 @@ func (r *Repository) ListTransfers(ctx context.Context, dealID string) ([]domain
 	return list, nil
 }
 
+func (r *Repository) DeclineAllExcept(ctx context.Context, dealID, actorID string) error {
+	const q = `
+		UPDATE chain_deal_transactions
+		SET status = $3, updated_at = now()
+		WHERE deal_id = $1::uuid AND participant_id <> $2::uuid AND status <> $3
+	`
+	_, err := r.pool.Exec(ctx, q, dealID, actorID, domain.ProposalStatusDeclined)
+	return err
+}
+
+func (r *Repository) DeclineAllForDeal(ctx context.Context, dealID string) error {
+	const q = `
+		UPDATE chain_deal_transactions
+		SET status = $2, updated_at = now()
+		WHERE deal_id = $1::uuid AND status <> $2
+	`
+	_, err := r.pool.Exec(ctx, q, dealID, domain.ProposalStatusDeclined)
+	return err
+}
+
 func (r *Repository) UnlockAllForDeal(ctx context.Context, dealID string) error {
 	const q = `
 		UPDATE items
