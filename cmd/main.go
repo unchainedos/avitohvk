@@ -46,7 +46,7 @@ func main() {
 	}
 	repo := userrepo.NewRepository(pool)
 	userSvc := userservice.NewService(repo, []byte(cfg.JWT.Secret), jwtTTL)
-	authHandler := auth.New(userSvc)
+	authHandler := auth.New(userSvc, jwtTTL)
 	userHandler := user.New(userSvc)
 
 	itemHandler := item.New()
@@ -60,6 +60,7 @@ func main() {
 			router.RegistratorFunc(itemHandler.RegisterPublicRoutes),
 			router.RegistratorFunc(wishHandler.RegisterPublicRoutes),
 			router.RegistratorFunc(usersHandler.RegisterPublicRoutes),
+			router.RegistratorFunc(userHandler.RegisterPublicRoutes),
 		}),
 		router.WithGroup([]router.RouteRegistrator{
 			chown.New(),
