@@ -7,13 +7,17 @@ import (
 	"time"
 
 	"avitohvk/config"
+	dealrepo "avitohvk/internal/repository/deal"
+	proposalrepo "avitohvk/internal/repository/proposal"
 	userrepo "avitohvk/internal/repository/user"
 	"avitohvk/internal/server"
+	proposalservice "avitohvk/internal/service/proposal"
 	userservice "avitohvk/internal/service/user"
 	"avitohvk/internal/transport/handler/auth"
 	"avitohvk/internal/transport/handler/chown"
+	"avitohvk/internal/transport/handler/deal"
 	"avitohvk/internal/transport/handler/item"
-	_ "avitohvk/internal/transport/handler/props"
+	"avitohvk/internal/transport/handler/props"
 	"avitohvk/internal/transport/handler/search"
 	"avitohvk/internal/transport/handler/user"
 	"avitohvk/internal/transport/handler/users"
@@ -49,6 +53,10 @@ func main() {
 	authHandler := auth.New(userSvc)
 	userHandler := user.New(userSvc)
 
+	proposalSvc := proposalservice.NewService(dealrepo.NewRepository(pool), proposalrepo.NewRepository(pool))
+	dealHandler := deal.New(proposalSvc)
+	propsHandler := props.New(proposalSvc)
+
 	itemHandler := item.New()
 	wishHandler := wish.New()
 	usersHandler := users.New()
@@ -63,9 +71,9 @@ func main() {
 		}),
 		router.WithGroup([]router.RouteRegistrator{
 			chown.New(),
-			// deal.New(),
+			dealHandler,
 			userHandler,
-			// props.New(),
+			propsHandler,
 			router.RegistratorFunc(itemHandler.RegisterProtectedRoutes),
 			router.RegistratorFunc(wishHandler.RegisterProtectedRoutes),
 			router.RegistratorFunc(usersHandler.RegisterProtectedRoutes),
