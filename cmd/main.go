@@ -14,7 +14,7 @@ import (
 	proposalservice "avitohvk/internal/service/proposal"
 	userservice "avitohvk/internal/service/user"
 	"avitohvk/internal/transport/handler/auth"
-	"avitohvk/internal/transport/handler/chown"
+	_ "avitohvk/internal/transport/handler/chown"
 	"avitohvk/internal/transport/handler/deal"
 	"avitohvk/internal/transport/handler/item"
 	"avitohvk/internal/transport/handler/props"
@@ -70,7 +70,7 @@ func main() {
 			router.RegistratorFunc(usersHandler.RegisterPublicRoutes),
 		}),
 		router.WithGroup([]router.RouteRegistrator{
-			// chown.New(chownSvc), // TODO: wire up once chown service/repository land
+			// chown.New(chownSvc),
 			dealHandler,
 			userHandler,
 			propsHandler,
