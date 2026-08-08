@@ -49,7 +49,6 @@ func toDealResponse(d domain.Deal) dto.DealResponse {
 		RootItemID:               d.RootItemID,
 		CreatorID:                d.CreatorID,
 		Status:                   string(d.Status),
-		Participants:             d.Participants,
 		NegotiationWindowSeconds: int64(d.NegotiationWindow.Seconds()),
 		DeadlineAt:               d.DeadlineAt,
 		CreatedAt:                d.CreatedAt,

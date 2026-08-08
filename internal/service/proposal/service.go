@@ -13,13 +13,10 @@ import (
 	proposalrepo "avitohvk/internal/repository/proposal"
 )
 
-const (
-	minParticipants          = 2
-	defaultNegotiationWindow = 24 * time.Hour
-)
+const defaultNegotiationWindow = 24 * time.Hour
 
 type DealRepository interface {
-	Create(ctx context.Context, rootItemID, creatorID string, participants int, negotiationWindow time.Duration) (domain.Deal, error)
+	Create(ctx context.Context, rootItemID, creatorID string, negotiationWindow time.Duration) (domain.Deal, error)
 	GetByID(ctx context.Context, id string) (domain.Deal, error)
 	UpdateStatus(ctx context.Context, id string, status domain.DealStatus) (domain.Deal, error)
 }
@@ -31,7 +28,6 @@ type ProposalRepository interface {
 	SetStatus(ctx context.Context, dealID, participantID string, status domain.ProposalStatus) (domain.Proposal, error)
 	ListForUser(ctx context.Context, userID string) ([]domain.Proposal, error)
 	AllAccepted(ctx context.Context, dealID string) (bool, error)
-	CountForDeal(ctx context.Context, dealID string) (int, error)
 	TryLockChain(ctx context.Context, dealID string) error
 	UnlockAllForDeal(ctx context.Context, dealID string) error
 }
@@ -63,10 +59,7 @@ func (s *Service) CreateDeal(ctx context.Context, actorID string, req dto.Create
 	if req.RootItemID == "" {
 		return domain.Proposal{}, fmt.Errorf("%w: root_item_id required", statusErrors.ErrBadRequest)
 	}
-	if req.Participants < minParticipants {
-		return domain.Proposal{}, fmt.Errorf("%w: participants must be at least %d", statusErrors.ErrBadRequest, minParticipants)
-	}
-	d, err := s.deals.Create(ctx, req.RootItemID, actorID, req.Participants, defaultNegotiationWindow)
+	d, err := s.deals.Create(ctx, req.RootItemID, actorID, defaultNegotiationWindow)
 	if err != nil {
 		if errors.Is(err, dealrepo.ErrRootItemNotFound) {
 			return domain.Proposal{}, fmt.Errorf("%w: root item not found", statusErrors.ErrNotFound)
@@ -90,12 +83,8 @@ func (s *Service) CreateProposal(ctx context.Context, actorID, dealID string, re
 		return domain.Proposal{}, err
 	}
 
-	count, err := s.proposals.CountForDeal(ctx, dealID)
-	if err != nil {
-		return domain.Proposal{}, err
-	}
-	if count >= d.Participants {
-		return domain.Proposal{}, fmt.Errorf("%w: deal already has enough participants", statusErrors.ErrConflict)
+	if d.DeadlineAt != nil {
+		return domain.Proposal{}, fmt.Errorf("%w: chain is already closed to new participants", statusErrors.ErrConflict)
 	}
 
 	if _, err := s.proposals.GetByDealAndParticipant(ctx, dealID, actorID); err == nil {
@@ -122,8 +111,8 @@ func (s *Service) createProposal(ctx context.Context, dealID, actorID, itemID st
 		if errors.Is(err, proposalrepo.ErrAlreadyProposed) {
 			return domain.Proposal{}, fmt.Errorf("%w: proposal already exists for this deal", statusErrors.ErrConflict)
 		}
-		if errors.Is(err, proposalrepo.ErrDealFull) {
-			return domain.Proposal{}, fmt.Errorf("%w: deal already has enough participants", statusErrors.ErrConflict)
+		if errors.Is(err, proposalrepo.ErrChainClosed) {
+			return domain.Proposal{}, fmt.Errorf("%w: chain is already closed to new participants", statusErrors.ErrConflict)
 		}
 		return domain.Proposal{}, err
 	}

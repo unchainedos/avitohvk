@@ -20,7 +20,7 @@ var (
 	ErrRecipientNotFound = errors.New("no one wishes for this item")
 	ErrNotItemHolder     = errors.New("participant does not hold this item")
 	ErrAlreadyProposed   = errors.New("proposal already exists for this deal")
-	ErrDealFull          = errors.New("deal already has enough participants")
+	ErrChainClosed       = errors.New("chain is already closed to new participants")
 	ErrNotPending        = errors.New("proposal is not pending")
 	ErrOutOfOrder        = errors.New("recipient has not accepted yet")
 )
@@ -41,29 +41,22 @@ func (r *Repository) Create(ctx context.Context, dealID, participantID, itemID s
 	defer tx.Rollback(ctx)
 
 	const qDeal = `
-		SELECT participants, negotiation_window_seconds, deadline_at
+		SELECT (root_item_id = $2::uuid), negotiation_window_seconds, deadline_at
 		FROM chain_deals
 		WHERE id = $1::uuid
 		FOR UPDATE
 	`
-	var participants int
+	var isRootItem bool
 	var negotiationWindowSeconds int64
 	var deadlineAt *time.Time
-	if err := tx.QueryRow(ctx, qDeal, dealID).Scan(&participants, &negotiationWindowSeconds, &deadlineAt); err != nil {
+	if err := tx.QueryRow(ctx, qDeal, dealID, itemID).Scan(&isRootItem, &negotiationWindowSeconds, &deadlineAt); err != nil {
 		return domain.Proposal{}, err
 	}
-
-	const qCount = `SELECT COUNT(*) FROM chain_deal_transactions WHERE deal_id = $1::uuid`
-	var count int
-	if err := tx.QueryRow(ctx, qCount, dealID).Scan(&count); err != nil {
-		return domain.Proposal{}, err
-	}
-	if count >= participants {
-		return domain.Proposal{}, ErrDealFull
+	if deadlineAt != nil {
+		return domain.Proposal{}, ErrChainClosed
 	}
 
-	// This join is what completes the chain end-to-end: start the negotiation deadline now.
-	if deadlineAt == nil && count+1 == participants {
+	if isRootItem {
 		deadline := time.Now().Add(time.Duration(negotiationWindowSeconds) * time.Second)
 		const qStart = `UPDATE chain_deals SET deadline_at = $2 WHERE id = $1::uuid`
 		if _, err := tx.Exec(ctx, qStart, dealID, deadline); err != nil {
@@ -269,27 +262,18 @@ func (r *Repository) ListForUser(ctx context.Context, userID string) ([]domain.P
 
 func (r *Repository) AllAccepted(ctx context.Context, dealID string) (bool, error) {
 	const q = `
-		SELECT COUNT(cdt.transaction_id) = d.participants
+		SELECT d.deadline_at IS NOT NULL
 		   AND COUNT(cdt.transaction_id) FILTER (WHERE cdt.status <> 'ACCEPTED') = 0
 		FROM chain_deals d
 		LEFT JOIN chain_deal_transactions cdt ON cdt.deal_id = d.id
 		WHERE d.id = $1::uuid
-		GROUP BY d.id, d.participants
+		GROUP BY d.id, d.deadline_at
 	`
 	var allAccepted bool
 	if err := r.pool.QueryRow(ctx, q, dealID).Scan(&allAccepted); err != nil {
 		return false, err
 	}
 	return allAccepted, nil
-}
-
-func (r *Repository) CountForDeal(ctx context.Context, dealID string) (int, error) {
-	const q = `SELECT COUNT(*) FROM chain_deal_transactions WHERE deal_id = $1::uuid`
-	var count int
-	if err := r.pool.QueryRow(ctx, q, dealID).Scan(&count); err != nil {
-		return 0, err
-	}
-	return count, nil
 }
 
 func (r *Repository) TryLockChain(ctx context.Context, dealID string) error {
@@ -300,24 +284,14 @@ func (r *Repository) TryLockChain(ctx context.Context, dealID string) error {
 	defer tx.Rollback(ctx)
 
 	const qDeal = `
-		SELECT creator_id::text, root_item_id::text, participants
+		SELECT creator_id::text, root_item_id::text
 		FROM chain_deals
 		WHERE id = $1::uuid
 		FOR UPDATE
 	`
 	var creatorID, rootItemID string
-	var participants int
-	if err := tx.QueryRow(ctx, qDeal, dealID).Scan(&creatorID, &rootItemID, &participants); err != nil {
+	if err := tx.QueryRow(ctx, qDeal, dealID).Scan(&creatorID, &rootItemID); err != nil {
 		return err
-	}
-
-	const qChainCount = `SELECT COUNT(*) FROM chain_deal_transactions WHERE deal_id = $1::uuid`
-	var count int
-	if err := tx.QueryRow(ctx, qChainCount, dealID).Scan(&count); err != nil {
-		return err
-	}
-	if count < participants {
-		return tx.Commit(ctx)
 	}
 
 	const qAccepted = `
