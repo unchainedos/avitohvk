@@ -8,12 +8,7 @@ import (
 	"avitohvk/internal/domain"
 	"avitohvk/internal/dto"
 	statusErrors "avitohvk/internal/errors"
-)
-
-var (
-	ErrItemNotFound      = errors.New("item not found")
-	ErrNotItemHolder     = errors.New("participant does not hold this item")
-	ErrRecipientNotFound = errors.New("no one wishes for this item")
+	chownrepo "avitohvk/internal/repository/chown"
 )
 
 type Repository interface {
@@ -52,14 +47,20 @@ func (s *Service) Chown(ctx context.Context, actorID, itemID string, req dto.Cho
 
 	result, err := s.repo.Chown(ctx, actorID, itemID, offers)
 	if err != nil {
-		if errors.Is(err, ErrItemNotFound) {
+		if errors.Is(err, chownrepo.ErrItemNotFound) {
 			return dto.ChownResponse{}, fmt.Errorf("%w: item not found", statusErrors.ErrNotFound)
 		}
-		if errors.Is(err, ErrNotItemHolder) {
+		if errors.Is(err, chownrepo.ErrNotItemHolder) {
 			return dto.ChownResponse{}, fmt.Errorf("%w: you do not hold this item", statusErrors.ErrConflict)
 		}
-		if errors.Is(err, ErrRecipientNotFound) {
+		if errors.Is(err, chownrepo.ErrRecipientNotFound) {
 			return dto.ChownResponse{}, fmt.Errorf("%w: no one wishes for this item", statusErrors.ErrNotFound)
+		}
+		if errors.Is(err, chownrepo.ErrOwnItem) {
+			return dto.ChownResponse{}, fmt.Errorf("%w: cannot chown your own item", statusErrors.ErrBadRequest)
+		}
+		if errors.Is(err, chownrepo.ErrItemLocked) {
+			return dto.ChownResponse{}, fmt.Errorf("%w: someone else already has exclusive rights to this item", statusErrors.ErrConflict)
 		}
 		return dto.ChownResponse{}, err
 	}
