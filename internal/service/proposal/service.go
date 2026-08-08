@@ -229,6 +229,9 @@ func (s *Service) Approve(ctx context.Context, actorID, dealID string) (domain.P
 		if errors.Is(err, proposalrepo.ErrOutOfOrder) {
 			return domain.Proposal{}, fmt.Errorf("%w: your recipient has not accepted yet", statusErrors.ErrConflict)
 		}
+		if errors.Is(err, proposalrepo.ErrNotItemHolder) {
+			return domain.Proposal{}, fmt.Errorf("%w: you no longer hold the item you offered", statusErrors.ErrConflict)
+		}
 		return domain.Proposal{}, err
 	}
 

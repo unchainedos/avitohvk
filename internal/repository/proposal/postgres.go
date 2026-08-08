@@ -200,6 +200,14 @@ func (r *Repository) SetStatus(ctx context.Context, dealID, participantID string
 	}
 
 	if status == domain.ProposalStatusAccepted {
+		stillHolds, err := stillHoldsOfferedItem(ctx, tx, dealID, participantID)
+		if err != nil {
+			return domain.Proposal{}, err
+		}
+		if !stillHolds {
+			return domain.Proposal{}, ErrNotItemHolder
+		}
+
 		allowed, err := isApprovalAllowed(ctx, tx, dealID, participantID)
 		if err != nil {
 			return domain.Proposal{}, err
@@ -228,7 +236,7 @@ func (r *Repository) SetStatus(ctx context.Context, dealID, participantID string
 		const qExtend = `
 			UPDATE chain_deals
 			SET deadline_at = now() + (negotiation_window_seconds || ' seconds')::interval
-			WHERE id = $1::uuid
+			WHERE id = $1::uuid AND deadline_at IS NOT NULL
 		`
 		if _, err := tx.Exec(ctx, qExtend, dealID); err != nil {
 			return domain.Proposal{}, err
@@ -337,9 +345,9 @@ func (r *Repository) TryLockChain(ctx context.Context, dealID string) error {
 		return tx.Commit(ctx)
 	}
 
-	const qAlreadyLocked = `SELECT is_locked FROM items WHERE id = $1::uuid`
+	const qAlreadyLocked = `SELECT COALESCE(locked_by_deal_id = $2::uuid, false) FROM items WHERE id = $1::uuid`
 	var alreadyLocked bool
-	if err := tx.QueryRow(ctx, qAlreadyLocked, rootItemID).Scan(&alreadyLocked); err != nil {
+	if err := tx.QueryRow(ctx, qAlreadyLocked, rootItemID, dealID).Scan(&alreadyLocked); err != nil {
 		return err
 	}
 	if alreadyLocked {
@@ -457,6 +465,23 @@ func lockPending(ctx context.Context, tx pgx.Tx, dealID, participantID string) e
 		return ErrNotPending
 	}
 	return nil
+}
+
+func stillHoldsOfferedItem(ctx context.Context, tx pgx.Tx, dealID, participantID string) (bool, error) {
+	const query = `
+		SELECT i.holder_id = cdt.participant_id
+		FROM chain_deal_transactions cdt
+		JOIN transactions t ON t.id = cdt.transaction_id
+		JOIN items i ON i.id = t.item_id
+		WHERE cdt.deal_id = $1::uuid AND cdt.participant_id = $2::uuid
+		FOR UPDATE OF i
+	`
+	var stillHolds bool
+	err := tx.QueryRow(ctx, query, dealID, participantID).Scan(&stillHolds)
+	if err != nil {
+		return false, err
+	}
+	return stillHolds, nil
 }
 
 func isApprovalAllowed(ctx context.Context, tx pgx.Tx, dealID, participantID string) (bool, error) {
