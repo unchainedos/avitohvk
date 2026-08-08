@@ -17,6 +17,7 @@ var (
 	ErrNotFound          = errors.New("proposal not found")
 	ErrItemNotFound      = errors.New("item not found")
 	ErrRecipientNotFound = errors.New("no one wishes for this item")
+	ErrNotItemHolder     = errors.New("participant does not hold this item")
 )
 
 type Repository struct {
@@ -33,6 +34,10 @@ func (r *Repository) Create(ctx context.Context, dealID, participantID, itemID s
 		return domain.Proposal{}, err
 	}
 	defer tx.Rollback(ctx)
+
+	if err := checkItemHolder(ctx, tx, itemID, participantID); err != nil {
+		return domain.Proposal{}, err
+	}
 
 	toUserID, err := resolveRecipient(ctx, tx, itemID, participantID)
 	if err != nil {
@@ -92,6 +97,9 @@ func (r *Repository) Update(ctx context.Context, dealID, participantID string, u
 	args := []any{dealID, participantID}
 	n := 3
 	if upd.ItemID != nil {
+		if err := checkItemHolder(ctx, r.pool, *upd.ItemID, participantID); err != nil {
+			return domain.Proposal{}, err
+		}
 		toUserID, err := resolveRecipient(ctx, r.pool, *upd.ItemID, participantID)
 		if err != nil {
 			return domain.Proposal{}, err
@@ -207,6 +215,22 @@ func (r *Repository) CountForDeal(ctx context.Context, dealID string) (int, erro
 
 type rowQuerier interface {
 	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
+}
+
+func checkItemHolder(ctx context.Context, q rowQuerier, itemID, participantID string) error {
+	const query = `SELECT holder_id::text FROM items WHERE id = $1::uuid`
+	var holderID string
+	err := q.QueryRow(ctx, query, itemID).Scan(&holderID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return ErrItemNotFound
+	}
+	if err != nil {
+		return err
+	}
+	if holderID != participantID {
+		return ErrNotItemHolder
+	}
+	return nil
 }
 
 func resolveRecipient(ctx context.Context, q rowQuerier, itemID, proposerID string) (string, error) {

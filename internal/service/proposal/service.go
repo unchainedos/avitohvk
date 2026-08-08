@@ -115,6 +115,9 @@ func (s *Service) createProposal(ctx context.Context, dealID, actorID, itemID st
 		if errors.Is(err, proposalrepo.ErrRecipientNotFound) {
 			return domain.Proposal{}, fmt.Errorf("%w: no one wishes for this item", statusErrors.ErrNotFound)
 		}
+		if errors.Is(err, proposalrepo.ErrNotItemHolder) {
+			return domain.Proposal{}, fmt.Errorf("%w: you do not hold this item", statusErrors.ErrConflict)
+		}
 		return domain.Proposal{}, err
 	}
 	return p, nil
@@ -146,6 +149,9 @@ func (s *Service) UpdateProposal(ctx context.Context, actorID, dealID string, up
 		}
 		if errors.Is(err, proposalrepo.ErrRecipientNotFound) {
 			return domain.Proposal{}, fmt.Errorf("%w: no one wishes for this item", statusErrors.ErrNotFound)
+		}
+		if errors.Is(err, proposalrepo.ErrNotItemHolder) {
+			return domain.Proposal{}, fmt.Errorf("%w: you do not hold this item", statusErrors.ErrConflict)
 		}
 		return domain.Proposal{}, err
 	}
