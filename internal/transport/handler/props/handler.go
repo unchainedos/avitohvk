@@ -20,7 +20,7 @@ func (h *PropsHandler) RegisterRoutes(r chi.Router) {
 	r.Post("/props/{deal_id}", h.Create)
 	r.Delete("/props/{deal_id}", h.Delete)
 	r.Get("/props/users/{user_id}", h.GetByUser)
-	r.Post("/props/aprove/{deal_id}", h.Approve)
+	r.Post("/props/approve/{deal_id}", h.Approve)
 }
 
 func (h *PropsHandler) Get(w http.ResponseWriter, r *http.Request) {
