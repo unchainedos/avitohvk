@@ -58,7 +58,7 @@ func main() {
 	itemSvc := itemservice.NewService(itemRepository)
 	wishSvc := wishservice.NewService(wishRepository)
 
-	authHandler := auth.New(userSvc)
+	authHandler := auth.New(userSvc, jwtTTL)
 	userHandler := user.New(userSvc, itemSvc)
 	itemHandler := item.New(itemSvc)
 	wishHandler := wish.New(wishSvc)
@@ -71,11 +71,12 @@ func main() {
 			router.RegistratorFunc(itemHandler.RegisterPublicRoutes),
 			router.RegistratorFunc(wishHandler.RegisterPublicRoutes),
 			router.RegistratorFunc(usersHandler.RegisterPublicRoutes),
+			router.RegistratorFunc(userHandler.RegisterPublicRoutes),
 		}),
 		router.WithGroup([]router.RouteRegistrator{
 			chown.New(),
 			deal.New(),
-			userHandler,
+			router.RegistratorFunc(userHandler.RegisterProtectedRoutes),
 			props.New(),
 			router.RegistratorFunc(itemHandler.RegisterProtectedRoutes),
 			router.RegistratorFunc(wishHandler.RegisterProtectedRoutes),

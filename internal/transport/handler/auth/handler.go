@@ -3,9 +3,11 @@ package auth
 import (
 	"context"
 	"net/http"
+	"time"
 
 	"avitohvk/internal/dto"
 	statusErrors "avitohvk/internal/errors"
+	"avitohvk/internal/transport/middleware"
 	"avitohvk/internal/transport/utilhttp"
 
 	"github.com/go-chi/chi/v5"
@@ -17,10 +19,14 @@ type AuthService interface {
 }
 type AuthHandler struct {
 	service AuthService
+	jwtTTL  time.Duration
 }
 
-func New(service AuthService) *AuthHandler {
-	return &AuthHandler{service: service}
+func New(service AuthService, jwtTTL time.Duration) *AuthHandler {
+	return &AuthHandler{
+		service: service,
+		jwtTTL:  jwtTTL,
+	}
 }
 
 func (h *AuthHandler) RegisterRoutes(r chi.Router) {
@@ -40,7 +46,17 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 		utilhttp.WriteError(w, err)
 		return
 	}
-	_ = utilhttp.WriteJSON(w, http.StatusOK, dto.AuthResponse{Token: token})
+
+	http.SetCookie(w, &http.Cookie{
+		Name:     middleware.AccessTokenCookie,
+		Value:    token,
+		Path:     "/",
+		HttpOnly: true,
+		SameSite: http.SameSiteLaxMode,
+		MaxAge:   int(h.jwtTTL.Seconds()),
+	})
+
+	_ = utilhttp.WriteJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
 
 func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
