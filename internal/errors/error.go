@@ -7,6 +7,7 @@ var (
 	ErrUnauthorized = errors.New("unauthorized")
 	ErrNotFound     = errors.New("not found")
 	ErrConflict     = errors.New("conflict")
+	ErrBadGateway   = errors.New("bad gateway")
 )
 
 type ErrorResponse struct {

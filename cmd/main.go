@@ -7,11 +7,18 @@ import (
 	"time"
 
 	"avitohvk/config"
+	chownrepo "avitohvk/internal/repository/chown"
+	dealrepo "avitohvk/internal/repository/deal"
 	itemrepo "avitohvk/internal/repository/item"
+	proposalrepo "avitohvk/internal/repository/proposal"
+	searchrepo "avitohvk/internal/repository/search"
 	userrepo "avitohvk/internal/repository/user"
 	wishrepo "avitohvk/internal/repository/wish"
 	"avitohvk/internal/server"
+	chownservice "avitohvk/internal/service/chown"
 	itemservice "avitohvk/internal/service/item"
+	proposalservice "avitohvk/internal/service/proposal"
+	searchservice "avitohvk/internal/service/search"
 	userservice "avitohvk/internal/service/user"
 	wishservice "avitohvk/internal/service/wish"
 	"avitohvk/internal/transport/handler/auth"
@@ -50,14 +57,17 @@ func main() {
 		jwtTTL = *cfg.JWT.TTL
 	}
 
+	searchRepository := searchrepo.NewRepository(pool)
 	userRepository := userrepo.NewRepository(pool)
 	itemRepository := itemrepo.NewRepository(pool)
 	wishRepository := wishrepo.NewRepository(pool)
 
+	searchSvc := searchservice.NewService(searchRepository)
 	userSvc := userservice.NewService(userRepository, []byte(cfg.JWT.Secret), jwtTTL)
 	itemSvc := itemservice.NewService(itemRepository)
 	wishSvc := wishservice.NewService(wishRepository)
 
+	searchHandler := search.New(searchSvc)
 	authHandler := auth.New(userSvc, jwtTTL)
 	userHandler := user.New(userSvc, itemSvc)
 	itemHandler := item.New(itemSvc)
@@ -72,14 +82,10 @@ func main() {
 	dealHandler := deal.New(proposalSvc)
 	propsHandler := props.New(proposalSvc)
 
-	itemHandler := item.New()
-	wishHandler := wish.New()
-	usersHandler := users.New()
-
 	handler := router.New(
 		router.WithGroup([]router.RouteRegistrator{
 			authHandler,
-			search.New(),
+			router.RegistratorFunc(searchHandler.RegisterRoutes),
 			router.RegistratorFunc(itemHandler.RegisterPublicRoutes),
 			router.RegistratorFunc(wishHandler.RegisterPublicRoutes),
 			router.RegistratorFunc(usersHandler.RegisterPublicRoutes),

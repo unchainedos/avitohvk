@@ -60,6 +60,8 @@ func WriteError(w http.ResponseWriter, err error) {
 		status = http.StatusNotFound
 	case errors.Is(err, statusErrors.ErrConflict):
 		status = http.StatusConflict
+	case errors.Is(err, statusErrors.ErrBadGateway):
+		status = http.StatusBadGateway
 	default:
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) && pgErr.Code == "22P02" {
