@@ -10,4 +10,4 @@ jwt:
   ttl: 24h
 
 database:
-  url: "postgres://avitohvk:avitohvk@localhost:5432/avitohvk?sslmode=disable"
+  url: "postgres://avitohvk:avitohvk@postgres:5432/avitohvk?sslmode=disable"
