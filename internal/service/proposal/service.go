@@ -15,15 +15,10 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 )
 
-const defaultNegotiationWindow = 24 * time.Hour
-
-// maxLockChainRetries bounds retries of TryLockChain on a Postgres deadlock.
-// TryLockChain is the one place that reaches across into another (competing)
-// deal's rows and into shared items, so it's the only step that can deadlock
-// against a concurrent close of a different, overlapping deal. A deadlock
-// victim's transaction is always cleanly rolled back by Postgres, so retrying
-// is safe — there is no risk of double-applying any of its effects.
-const maxLockChainRetries = 3
+const (
+	defaultNegotiationWindow = 24 * time.Hour
+	maxLockChainRetries      = 3
+)
 
 func isDeadlock(err error) bool {
 	var pgErr *pgconn.PgError

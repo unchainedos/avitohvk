@@ -218,6 +218,10 @@ func (r *Repository) SetStatus(ctx context.Context, dealID, participantID string
 		if !allowed {
 			return domain.Proposal{}, ErrOutOfOrder
 		}
+
+		if err := lockOfferedItem(ctx, tx, dealID, participantID); err != nil {
+			return domain.Proposal{}, err
+		}
 	}
 
 	const q = `
@@ -348,15 +352,6 @@ func (r *Repository) TryLockChain(ctx context.Context, dealID string) error {
 		return tx.Commit(ctx)
 	}
 
-	const qAlreadyLocked = `SELECT COALESCE(locked_by_deal_id = $2::uuid, false) FROM items WHERE id = $1::uuid`
-	var alreadyLocked bool
-	if err := tx.QueryRow(ctx, qAlreadyLocked, rootItemID, dealID).Scan(&alreadyLocked); err != nil {
-		return err
-	}
-	if alreadyLocked {
-		return tx.Commit(ctx)
-	}
-
 	const qLockItems = `
 		UPDATE items
 		SET is_locked = true, locked_by_deal_id = $2::uuid
@@ -371,11 +366,6 @@ func (r *Repository) TryLockChain(ctx context.Context, dealID string) error {
 		return err
 	}
 
-	// Cancelling a competing deal must also decline its own proposals and free any
-	// items it exclusively held a lock on — otherwise those proposals are left
-	// dangling in a non-terminal (or even ACCEPTED) status under a CANCELLED deal,
-	// the same class of bug fixed for withdrawal and deadline expiry. All of it
-	// runs as one statement so it stays atomic with the item-locking above.
 	const qCancelCompeting = `
 		WITH competing AS (
 			SELECT id FROM chain_deals
@@ -474,12 +464,7 @@ func (r *Repository) UnlockAllForDeal(ctx context.Context, dealID string) error 
 	const q = `
 		UPDATE items
 		SET is_locked = false, locked_by_deal_id = NULL
-		WHERE id IN (
-			SELECT t.item_id
-			FROM chain_deal_transactions cdt
-			JOIN transactions t ON t.id = cdt.transaction_id
-			WHERE cdt.deal_id = $1::uuid
-		)
+		WHERE locked_by_deal_id = $1::uuid
 	`
 	_, err := r.pool.Exec(ctx, q, dealID)
 	return err
@@ -525,6 +510,20 @@ func stillHoldsOfferedItem(ctx context.Context, tx pgx.Tx, dealID, participantID
 		return false, err
 	}
 	return stillHolds, nil
+}
+
+func lockOfferedItem(ctx context.Context, tx pgx.Tx, dealID, participantID string) error {
+	const q = `
+		UPDATE items
+		SET is_locked = true, locked_by_deal_id = $1::uuid
+		FROM chain_deal_transactions cdt
+		JOIN transactions t ON t.id = cdt.transaction_id
+		WHERE items.id = t.item_id
+		  AND cdt.deal_id = $1::uuid
+		  AND cdt.participant_id = $2::uuid
+	`
+	_, err := tx.Exec(ctx, q, dealID, participantID)
+	return err
 }
 
 func isApprovalAllowed(ctx context.Context, tx pgx.Tx, dealID, participantID string) (bool, error) {
