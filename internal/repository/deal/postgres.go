@@ -25,15 +25,15 @@ func NewRepository(pool *pgxpool.Pool) *Repository {
 	return &Repository{pool: pool}
 }
 
-func (r *Repository) Create(ctx context.Context, rootItemID, creatorID string, participants int, negotiationWindow time.Duration) (domain.Deal, error) {
+func (r *Repository) Create(ctx context.Context, rootItemID, creatorID string, negotiationWindow time.Duration) (domain.Deal, error) {
 	const q = `
-		INSERT INTO chain_deals (root_item_id, creator_id, participants, negotiation_window_seconds)
-		VALUES ($1::uuid, $2::uuid, $3, $4)
-		RETURNING id::text, root_item_id::text, creator_id::text, status, participants,
+		INSERT INTO chain_deals (root_item_id, creator_id, negotiation_window_seconds)
+		VALUES ($1::uuid, $2::uuid, $3)
+		RETURNING id::text, root_item_id::text, creator_id::text, status,
 		          negotiation_window_seconds, deadline_at, created_at, updated_at
 	`
 	seconds := int64(negotiationWindow.Seconds())
-	d, err := r.scanDeal(r.pool.QueryRow(ctx, q, rootItemID, creatorID, participants, seconds))
+	d, err := r.scanDeal(r.pool.QueryRow(ctx, q, rootItemID, creatorID, seconds))
 	if err != nil {
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) && pgErr.Code == "23503" {
@@ -46,7 +46,7 @@ func (r *Repository) Create(ctx context.Context, rootItemID, creatorID string, p
 
 func (r *Repository) GetByID(ctx context.Context, id string) (domain.Deal, error) {
 	const q = `
-		SELECT id::text, root_item_id::text, creator_id::text, status, participants,
+		SELECT id::text, root_item_id::text, creator_id::text, status,
 		       negotiation_window_seconds, deadline_at, created_at, updated_at
 		FROM chain_deals
 		WHERE id = $1::uuid
@@ -59,17 +59,32 @@ func (r *Repository) UpdateStatus(ctx context.Context, id string, status domain.
 		UPDATE chain_deals
 		SET status = $2
 		WHERE id = $1::uuid
-		RETURNING id::text, root_item_id::text, creator_id::text, status, participants,
+		RETURNING id::text, root_item_id::text, creator_id::text, status,
 		          negotiation_window_seconds, deadline_at, created_at, updated_at
 	`
 	return r.scanDeal(r.pool.QueryRow(ctx, q, id, status))
+}
+
+func (r *Repository) LockDeal(ctx context.Context, dealID string) (func(context.Context), error) {
+	conn, err := r.pool.Acquire(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := conn.Exec(ctx, `SELECT pg_advisory_lock(hashtextextended($1, 0))`, dealID); err != nil {
+		conn.Release()
+		return nil, err
+	}
+	return func(unlockCtx context.Context) {
+		conn.Exec(unlockCtx, `SELECT pg_advisory_unlock(hashtextextended($1, 0))`, dealID)
+		conn.Release()
+	}, nil
 }
 
 func (r *Repository) scanDeal(row pgx.Row) (domain.Deal, error) {
 	var d domain.Deal
 	var seconds int64
 	err := row.Scan(
-		&d.ID, &d.RootItemID, &d.CreatorID, &d.Status, &d.Participants,
+		&d.ID, &d.RootItemID, &d.CreatorID, &d.Status,
 		&seconds, &d.DeadlineAt, &d.CreatedAt, &d.UpdatedAt,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {

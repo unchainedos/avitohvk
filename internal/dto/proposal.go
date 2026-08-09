@@ -3,10 +3,9 @@ package dto
 import "time"
 
 type CreateDealRequest struct {
-	RootItemID   string  `json:"root_item_id"`
-	ItemID       string  `json:"item_id"`
-	Quantity     float64 `json:"quantity"`
-	Participants int     `json:"participants"`
+	RootItemID string  `json:"root_item_id"`
+	ItemID     string  `json:"item_id"`
+	Quantity   float64 `json:"quantity"`
 }
 
 type CreateProposalRequest struct {
@@ -39,7 +38,6 @@ type DealResponse struct {
 	RootItemID               string     `json:"root_item_id"`
 	CreatorID                string     `json:"creator_id"`
 	Status                   string     `json:"status"`
-	Participants             int        `json:"participants"`
 	NegotiationWindowSeconds int64      `json:"negotiation_window_seconds"`
 	DeadlineAt               *time.Time `json:"deadline_at"`
 	CreatedAt                time.Time  `json:"created_at"`

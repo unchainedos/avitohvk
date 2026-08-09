@@ -20,9 +20,10 @@ var (
 	ErrRecipientNotFound = errors.New("no one wishes for this item")
 	ErrNotItemHolder     = errors.New("participant does not hold this item")
 	ErrAlreadyProposed   = errors.New("proposal already exists for this deal")
-	ErrDealFull          = errors.New("deal already has enough participants")
+	ErrChainClosed       = errors.New("chain is already closed to new participants")
 	ErrNotPending        = errors.New("proposal is not pending")
 	ErrOutOfOrder        = errors.New("recipient has not accepted yet")
+	ErrItemLocked        = errors.New("item is locked by another confirmed deal")
 )
 
 type Repository struct {
@@ -41,29 +42,22 @@ func (r *Repository) Create(ctx context.Context, dealID, participantID, itemID s
 	defer tx.Rollback(ctx)
 
 	const qDeal = `
-		SELECT participants, negotiation_window_seconds, deadline_at
+		SELECT (root_item_id = $2::uuid), negotiation_window_seconds, deadline_at
 		FROM chain_deals
 		WHERE id = $1::uuid
 		FOR UPDATE
 	`
-	var participants int
+	var isRootItem bool
 	var negotiationWindowSeconds int64
 	var deadlineAt *time.Time
-	if err := tx.QueryRow(ctx, qDeal, dealID).Scan(&participants, &negotiationWindowSeconds, &deadlineAt); err != nil {
+	if err := tx.QueryRow(ctx, qDeal, dealID, itemID).Scan(&isRootItem, &negotiationWindowSeconds, &deadlineAt); err != nil {
 		return domain.Proposal{}, err
 	}
-
-	const qCount = `SELECT COUNT(*) FROM chain_deal_transactions WHERE deal_id = $1::uuid`
-	var count int
-	if err := tx.QueryRow(ctx, qCount, dealID).Scan(&count); err != nil {
-		return domain.Proposal{}, err
-	}
-	if count >= participants {
-		return domain.Proposal{}, ErrDealFull
+	if deadlineAt != nil {
+		return domain.Proposal{}, ErrChainClosed
 	}
 
-	// This join is what completes the chain end-to-end: start the negotiation deadline now.
-	if deadlineAt == nil && count+1 == participants {
+	if isRootItem {
 		deadline := time.Now().Add(time.Duration(negotiationWindowSeconds) * time.Second)
 		const qStart = `UPDATE chain_deals SET deadline_at = $2 WHERE id = $1::uuid`
 		if _, err := tx.Exec(ctx, qStart, dealID, deadline); err != nil {
@@ -180,18 +174,21 @@ func (r *Repository) Update(ctx context.Context, dealID, participantID string, u
 		WHERE cdt.transaction_id = t.id
 		  AND cdt.deal_id = $1::uuid
 		  AND cdt.participant_id = $2::uuid
-		RETURNING cdt.deal_id::text, cdt.transaction_id::text, cdt.participant_id::text,
-		          t.item_id::text, t.to_user::text, t.quantity, cdt.status, cdt.updated_at
 	`, strings.Join(sets, ", "))
 
-	p, err := r.scanProposal(tx.QueryRow(ctx, q, args...))
-	if err != nil {
+	if _, err := tx.Exec(ctx, q, args...); err != nil {
 		return domain.Proposal{}, err
 	}
+
+	const qTouch = `UPDATE chain_deal_transactions SET updated_at = now() WHERE deal_id = $1::uuid AND participant_id = $2::uuid`
+	if _, err := tx.Exec(ctx, qTouch, dealID, participantID); err != nil {
+		return domain.Proposal{}, err
+	}
+
 	if err := tx.Commit(ctx); err != nil {
 		return domain.Proposal{}, err
 	}
-	return p, nil
+	return r.GetByDealAndParticipant(ctx, dealID, participantID)
 }
 
 func (r *Repository) SetStatus(ctx context.Context, dealID, participantID string, status domain.ProposalStatus) (domain.Proposal, error) {
@@ -206,6 +203,14 @@ func (r *Repository) SetStatus(ctx context.Context, dealID, participantID string
 	}
 
 	if status == domain.ProposalStatusAccepted {
+		stillHolds, err := stillHoldsOfferedItem(ctx, tx, dealID, participantID)
+		if err != nil {
+			return domain.Proposal{}, err
+		}
+		if !stillHolds {
+			return domain.Proposal{}, ErrNotItemHolder
+		}
+
 		allowed, err := isApprovalAllowed(ctx, tx, dealID, participantID)
 		if err != nil {
 			return domain.Proposal{}, err
@@ -229,6 +234,18 @@ func (r *Repository) SetStatus(ctx context.Context, dealID, participantID string
 	if err != nil {
 		return domain.Proposal{}, err
 	}
+
+	if status == domain.ProposalStatusAccepted {
+		const qExtend = `
+			UPDATE chain_deals
+			SET deadline_at = now() + (negotiation_window_seconds || ' seconds')::interval
+			WHERE id = $1::uuid AND deadline_at IS NOT NULL
+		`
+		if _, err := tx.Exec(ctx, qExtend, dealID); err != nil {
+			return domain.Proposal{}, err
+		}
+	}
+
 	if err := tx.Commit(ctx); err != nil {
 		return domain.Proposal{}, err
 	}
@@ -269,27 +286,18 @@ func (r *Repository) ListForUser(ctx context.Context, userID string) ([]domain.P
 
 func (r *Repository) AllAccepted(ctx context.Context, dealID string) (bool, error) {
 	const q = `
-		SELECT COUNT(cdt.transaction_id) = d.participants
+		SELECT d.deadline_at IS NOT NULL
 		   AND COUNT(cdt.transaction_id) FILTER (WHERE cdt.status <> 'ACCEPTED') = 0
 		FROM chain_deals d
 		LEFT JOIN chain_deal_transactions cdt ON cdt.deal_id = d.id
 		WHERE d.id = $1::uuid
-		GROUP BY d.id, d.participants
+		GROUP BY d.id, d.deadline_at
 	`
 	var allAccepted bool
 	if err := r.pool.QueryRow(ctx, q, dealID).Scan(&allAccepted); err != nil {
 		return false, err
 	}
 	return allAccepted, nil
-}
-
-func (r *Repository) CountForDeal(ctx context.Context, dealID string) (int, error) {
-	const q = `SELECT COUNT(*) FROM chain_deal_transactions WHERE deal_id = $1::uuid`
-	var count int
-	if err := r.pool.QueryRow(ctx, q, dealID).Scan(&count); err != nil {
-		return 0, err
-	}
-	return count, nil
 }
 
 func (r *Repository) TryLockChain(ctx context.Context, dealID string) error {
@@ -300,24 +308,14 @@ func (r *Repository) TryLockChain(ctx context.Context, dealID string) error {
 	defer tx.Rollback(ctx)
 
 	const qDeal = `
-		SELECT creator_id::text, root_item_id::text, participants
+		SELECT creator_id::text, root_item_id::text
 		FROM chain_deals
 		WHERE id = $1::uuid
 		FOR UPDATE
 	`
 	var creatorID, rootItemID string
-	var participants int
-	if err := tx.QueryRow(ctx, qDeal, dealID).Scan(&creatorID, &rootItemID, &participants); err != nil {
+	if err := tx.QueryRow(ctx, qDeal, dealID).Scan(&creatorID, &rootItemID); err != nil {
 		return err
-	}
-
-	const qChainCount = `SELECT COUNT(*) FROM chain_deal_transactions WHERE deal_id = $1::uuid`
-	var count int
-	if err := tx.QueryRow(ctx, qChainCount, dealID).Scan(&count); err != nil {
-		return err
-	}
-	if count < participants {
-		return tx.Commit(ctx)
 	}
 
 	const qAccepted = `
@@ -350,9 +348,9 @@ func (r *Repository) TryLockChain(ctx context.Context, dealID string) error {
 		return tx.Commit(ctx)
 	}
 
-	const qAlreadyLocked = `SELECT is_locked FROM items WHERE id = $1::uuid`
+	const qAlreadyLocked = `SELECT COALESCE(locked_by_deal_id = $2::uuid, false) FROM items WHERE id = $1::uuid`
 	var alreadyLocked bool
-	if err := tx.QueryRow(ctx, qAlreadyLocked, rootItemID).Scan(&alreadyLocked); err != nil {
+	if err := tx.QueryRow(ctx, qAlreadyLocked, rootItemID, dealID).Scan(&alreadyLocked); err != nil {
 		return err
 	}
 	if alreadyLocked {
@@ -361,7 +359,7 @@ func (r *Repository) TryLockChain(ctx context.Context, dealID string) error {
 
 	const qLockItems = `
 		UPDATE items
-		SET is_locked = true
+		SET is_locked = true, locked_by_deal_id = $2::uuid
 		WHERE id IN (
 			SELECT t.item_id
 			FROM chain_deal_transactions cdt
@@ -369,7 +367,7 @@ func (r *Repository) TryLockChain(ctx context.Context, dealID string) error {
 			WHERE cdt.deal_id = $1::uuid
 		)
 	`
-	if _, err := tx.Exec(ctx, qLockItems, dealID); err != nil {
+	if _, err := tx.Exec(ctx, qLockItems, dealID, dealID); err != nil {
 		return err
 	}
 
@@ -405,10 +403,57 @@ func (r *Repository) TryLockChain(ctx context.Context, dealID string) error {
 	return tx.Commit(ctx)
 }
 
+func (r *Repository) ListTransfers(ctx context.Context, dealID string) ([]domain.ItemTransfer, error) {
+	const q = `
+		SELECT t.item_id::text, t.to_user::text
+		FROM chain_deal_transactions cdt
+		JOIN transactions t ON t.id = cdt.transaction_id
+		WHERE cdt.deal_id = $1::uuid
+	`
+	rows, err := r.pool.Query(ctx, q, dealID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	list := make([]domain.ItemTransfer, 0)
+	for rows.Next() {
+		var it domain.ItemTransfer
+		if err := rows.Scan(&it.ItemID, &it.ToUserID); err != nil {
+			return nil, err
+		}
+		list = append(list, it)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return list, nil
+}
+
+func (r *Repository) DeclineAllExcept(ctx context.Context, dealID, actorID string) error {
+	const q = `
+		UPDATE chain_deal_transactions
+		SET status = $3, updated_at = now()
+		WHERE deal_id = $1::uuid AND participant_id <> $2::uuid AND status <> $3
+	`
+	_, err := r.pool.Exec(ctx, q, dealID, actorID, domain.ProposalStatusDeclined)
+	return err
+}
+
+func (r *Repository) DeclineAllForDeal(ctx context.Context, dealID string) error {
+	const q = `
+		UPDATE chain_deal_transactions
+		SET status = $2, updated_at = now()
+		WHERE deal_id = $1::uuid AND status <> $2
+	`
+	_, err := r.pool.Exec(ctx, q, dealID, domain.ProposalStatusDeclined)
+	return err
+}
+
 func (r *Repository) UnlockAllForDeal(ctx context.Context, dealID string) error {
 	const q = `
 		UPDATE items
-		SET is_locked = false
+		SET is_locked = false, locked_by_deal_id = NULL
 		WHERE id IN (
 			SELECT t.item_id
 			FROM chain_deal_transactions cdt
@@ -445,6 +490,23 @@ func lockPending(ctx context.Context, tx pgx.Tx, dealID, participantID string) e
 	return nil
 }
 
+func stillHoldsOfferedItem(ctx context.Context, tx pgx.Tx, dealID, participantID string) (bool, error) {
+	const query = `
+		SELECT i.holder_id = cdt.participant_id
+		FROM chain_deal_transactions cdt
+		JOIN transactions t ON t.id = cdt.transaction_id
+		JOIN items i ON i.id = t.item_id
+		WHERE cdt.deal_id = $1::uuid AND cdt.participant_id = $2::uuid
+		FOR UPDATE OF i
+	`
+	var stillHolds bool
+	err := tx.QueryRow(ctx, query, dealID, participantID).Scan(&stillHolds)
+	if err != nil {
+		return false, err
+	}
+	return stillHolds, nil
+}
+
 func isApprovalAllowed(ctx context.Context, tx pgx.Tx, dealID, participantID string) (bool, error) {
 	const query = `
 		SELECT
@@ -471,10 +533,16 @@ func isApprovalAllowed(ctx context.Context, tx pgx.Tx, dealID, participantID str
 	return allowed, nil
 }
 
-func checkItemHolder(ctx context.Context, q rowQuerier, itemID, participantID string) error {
-	const query = `SELECT holder_id::text FROM items WHERE id = $1::uuid`
+func checkItemHolder(ctx context.Context, tx pgx.Tx, itemID, participantID string) error {
+	const query = `
+		SELECT holder_id::text, is_locked, locked_by_deal_id IS NOT NULL
+		FROM items
+		WHERE id = $1::uuid
+		FOR UPDATE
+	`
 	var holderID string
-	err := q.QueryRow(ctx, query, itemID).Scan(&holderID)
+	var isLocked, lockedByDeal bool
+	err := tx.QueryRow(ctx, query, itemID).Scan(&holderID, &isLocked, &lockedByDeal)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return ErrItemNotFound
 	}
@@ -483,6 +551,15 @@ func checkItemHolder(ctx context.Context, q rowQuerier, itemID, participantID st
 	}
 	if holderID != participantID {
 		return ErrNotItemHolder
+	}
+	if isLocked {
+		if lockedByDeal {
+			return ErrItemLocked
+		}
+		const qRelease = `UPDATE items SET is_locked = false WHERE id = $1::uuid`
+		if _, err := tx.Exec(ctx, qRelease, itemID); err != nil {
+			return err
+		}
 	}
 	return nil
 }

@@ -13,15 +13,13 @@ import (
 	proposalrepo "avitohvk/internal/repository/proposal"
 )
 
-const (
-	minParticipants          = 2
-	defaultNegotiationWindow = 24 * time.Hour
-)
+const defaultNegotiationWindow = 24 * time.Hour
 
 type DealRepository interface {
-	Create(ctx context.Context, rootItemID, creatorID string, participants int, negotiationWindow time.Duration) (domain.Deal, error)
+	Create(ctx context.Context, rootItemID, creatorID string, negotiationWindow time.Duration) (domain.Deal, error)
 	GetByID(ctx context.Context, id string) (domain.Deal, error)
 	UpdateStatus(ctx context.Context, id string, status domain.DealStatus) (domain.Deal, error)
+	LockDeal(ctx context.Context, dealID string) (func(context.Context), error)
 }
 
 type ProposalRepository interface {
@@ -31,25 +29,32 @@ type ProposalRepository interface {
 	SetStatus(ctx context.Context, dealID, participantID string, status domain.ProposalStatus) (domain.Proposal, error)
 	ListForUser(ctx context.Context, userID string) ([]domain.Proposal, error)
 	AllAccepted(ctx context.Context, dealID string) (bool, error)
-	CountForDeal(ctx context.Context, dealID string) (int, error)
 	TryLockChain(ctx context.Context, dealID string) error
 	UnlockAllForDeal(ctx context.Context, dealID string) error
+	DeclineAllExcept(ctx context.Context, dealID, actorID string) error
+	DeclineAllForDeal(ctx context.Context, dealID string) error
+	ListTransfers(ctx context.Context, dealID string) ([]domain.ItemTransfer, error)
+}
+
+type ChownRepository interface {
+	CompleteTransfer(ctx context.Context, itemID, toUserID string) error
 }
 
 type Service struct {
 	deals     DealRepository
 	proposals ProposalRepository
+	chown     ChownRepository
 }
 
-func NewService(deals DealRepository, proposals ProposalRepository) *Service {
-	return &Service{deals: deals, proposals: proposals}
+func NewService(deals DealRepository, proposals ProposalRepository, chown ChownRepository) *Service {
+	return &Service{deals: deals, proposals: proposals, chown: chown}
 }
 
 func (s *Service) GetByID(ctx context.Context, id string) (domain.Deal, error) {
 	d, err := s.deals.GetByID(ctx, id)
 	if err != nil {
 		if errors.Is(err, dealrepo.ErrNotFound) {
-			return domain.Deal{}, statusErrors.ErrNotFound
+			return domain.Deal{}, fmt.Errorf("%w: deal not found", statusErrors.ErrNotFound)
 		}
 		return domain.Deal{}, err
 	}
@@ -63,10 +68,7 @@ func (s *Service) CreateDeal(ctx context.Context, actorID string, req dto.Create
 	if req.RootItemID == "" {
 		return domain.Proposal{}, fmt.Errorf("%w: root_item_id required", statusErrors.ErrBadRequest)
 	}
-	if req.Participants < minParticipants {
-		return domain.Proposal{}, fmt.Errorf("%w: participants must be at least %d", statusErrors.ErrBadRequest, minParticipants)
-	}
-	d, err := s.deals.Create(ctx, req.RootItemID, actorID, req.Participants, defaultNegotiationWindow)
+	d, err := s.deals.Create(ctx, req.RootItemID, actorID, defaultNegotiationWindow)
 	if err != nil {
 		if errors.Is(err, dealrepo.ErrRootItemNotFound) {
 			return domain.Proposal{}, fmt.Errorf("%w: root item not found", statusErrors.ErrNotFound)
@@ -82,6 +84,12 @@ func (s *Service) CreateProposal(ctx context.Context, actorID, dealID string, re
 		return domain.Proposal{}, err
 	}
 
+	release, err := s.deals.LockDeal(ctx, dealID)
+	if err != nil {
+		return domain.Proposal{}, err
+	}
+	defer release(context.WithoutCancel(ctx))
+
 	d, err := s.GetByID(ctx, dealID)
 	if err != nil {
 		return domain.Proposal{}, err
@@ -90,12 +98,8 @@ func (s *Service) CreateProposal(ctx context.Context, actorID, dealID string, re
 		return domain.Proposal{}, err
 	}
 
-	count, err := s.proposals.CountForDeal(ctx, dealID)
-	if err != nil {
-		return domain.Proposal{}, err
-	}
-	if count >= d.Participants {
-		return domain.Proposal{}, fmt.Errorf("%w: deal already has enough participants", statusErrors.ErrConflict)
+	if d.DeadlineAt != nil {
+		return domain.Proposal{}, fmt.Errorf("%w: chain is already closed to new participants", statusErrors.ErrConflict)
 	}
 
 	if _, err := s.proposals.GetByDealAndParticipant(ctx, dealID, actorID); err == nil {
@@ -122,8 +126,11 @@ func (s *Service) createProposal(ctx context.Context, dealID, actorID, itemID st
 		if errors.Is(err, proposalrepo.ErrAlreadyProposed) {
 			return domain.Proposal{}, fmt.Errorf("%w: proposal already exists for this deal", statusErrors.ErrConflict)
 		}
-		if errors.Is(err, proposalrepo.ErrDealFull) {
-			return domain.Proposal{}, fmt.Errorf("%w: deal already has enough participants", statusErrors.ErrConflict)
+		if errors.Is(err, proposalrepo.ErrChainClosed) {
+			return domain.Proposal{}, fmt.Errorf("%w: chain is already closed to new participants", statusErrors.ErrConflict)
+		}
+		if errors.Is(err, proposalrepo.ErrItemLocked) {
+			return domain.Proposal{}, fmt.Errorf("%w: item is locked by another confirmed deal", statusErrors.ErrConflict)
 		}
 		return domain.Proposal{}, err
 	}
@@ -134,7 +141,7 @@ func (s *Service) GetProposal(ctx context.Context, actorID, dealID string) (doma
 	p, err := s.proposals.GetByDealAndParticipant(ctx, dealID, actorID)
 	if err != nil {
 		if errors.Is(err, proposalrepo.ErrNotFound) {
-			return domain.Proposal{}, statusErrors.ErrNotFound
+			return domain.Proposal{}, fmt.Errorf("%w: proposal not found", statusErrors.ErrNotFound)
 		}
 		return domain.Proposal{}, err
 	}
@@ -149,7 +156,7 @@ func (s *Service) UpdateProposal(ctx context.Context, actorID, dealID string, up
 	p, err := s.proposals.Update(ctx, dealID, actorID, upd)
 	if err != nil {
 		if errors.Is(err, proposalrepo.ErrNotFound) {
-			return domain.Proposal{}, statusErrors.ErrNotFound
+			return domain.Proposal{}, fmt.Errorf("%w: proposal not found", statusErrors.ErrNotFound)
 		}
 		if errors.Is(err, proposalrepo.ErrItemNotFound) {
 			return domain.Proposal{}, fmt.Errorf("%w: item not found", statusErrors.ErrNotFound)
@@ -163,12 +170,21 @@ func (s *Service) UpdateProposal(ctx context.Context, actorID, dealID string, up
 		if errors.Is(err, proposalrepo.ErrNotPending) {
 			return domain.Proposal{}, fmt.Errorf("%w: proposal is not pending", statusErrors.ErrConflict)
 		}
+		if errors.Is(err, proposalrepo.ErrItemLocked) {
+			return domain.Proposal{}, fmt.Errorf("%w: item is locked by another confirmed deal", statusErrors.ErrConflict)
+		}
 		return domain.Proposal{}, err
 	}
 	return p, nil
 }
 
 func (s *Service) WithdrawProposal(ctx context.Context, actorID, dealID string) error {
+	release, err := s.deals.LockDeal(ctx, dealID)
+	if err != nil {
+		return err
+	}
+	defer release(context.WithoutCancel(ctx))
+
 	d, err := s.GetByID(ctx, dealID)
 	if err != nil {
 		return err
@@ -180,7 +196,7 @@ func (s *Service) WithdrawProposal(ctx context.Context, actorID, dealID string) 
 	_, err = s.proposals.SetStatus(ctx, dealID, actorID, domain.ProposalStatusDeclined)
 	if err != nil {
 		if errors.Is(err, proposalrepo.ErrNotFound) {
-			return statusErrors.ErrNotFound
+			return fmt.Errorf("%w: proposal not found", statusErrors.ErrNotFound)
 		}
 		if errors.Is(err, proposalrepo.ErrNotPending) {
 			return fmt.Errorf("%w: proposal is not pending", statusErrors.ErrConflict)
@@ -189,6 +205,9 @@ func (s *Service) WithdrawProposal(ctx context.Context, actorID, dealID string) 
 	}
 
 	if _, err := s.deals.UpdateStatus(ctx, dealID, domain.DealStatusCancelled); err != nil {
+		return err
+	}
+	if err := s.proposals.DeclineAllExcept(ctx, dealID, actorID); err != nil {
 		return err
 	}
 	if err := s.proposals.UnlockAllForDeal(ctx, dealID); err != nil {
@@ -209,6 +228,12 @@ func (s *Service) ListForUser(ctx context.Context, actorID, userID string) ([]do
 }
 
 func (s *Service) Approve(ctx context.Context, actorID, dealID string) (domain.Proposal, error) {
+	release, err := s.deals.LockDeal(ctx, dealID)
+	if err != nil {
+		return domain.Proposal{}, err
+	}
+	defer release(context.WithoutCancel(ctx))
+
 	d, err := s.GetByID(ctx, dealID)
 	if err != nil {
 		return domain.Proposal{}, err
@@ -220,13 +245,16 @@ func (s *Service) Approve(ctx context.Context, actorID, dealID string) (domain.P
 	p, err := s.proposals.SetStatus(ctx, dealID, actorID, domain.ProposalStatusAccepted)
 	if err != nil {
 		if errors.Is(err, proposalrepo.ErrNotFound) {
-			return domain.Proposal{}, statusErrors.ErrNotFound
+			return domain.Proposal{}, fmt.Errorf("%w: proposal not found", statusErrors.ErrNotFound)
 		}
 		if errors.Is(err, proposalrepo.ErrNotPending) {
 			return domain.Proposal{}, fmt.Errorf("%w: proposal is not pending", statusErrors.ErrConflict)
 		}
 		if errors.Is(err, proposalrepo.ErrOutOfOrder) {
 			return domain.Proposal{}, fmt.Errorf("%w: your recipient has not accepted yet", statusErrors.ErrConflict)
+		}
+		if errors.Is(err, proposalrepo.ErrNotItemHolder) {
+			return domain.Proposal{}, fmt.Errorf("%w: you no longer hold the item you offered", statusErrors.ErrConflict)
 		}
 		return domain.Proposal{}, err
 	}
@@ -243,6 +271,20 @@ func (s *Service) Approve(ctx context.Context, actorID, dealID string) (domain.P
 		if _, err := s.deals.UpdateStatus(ctx, dealID, domain.DealStatusConfirmed); err != nil {
 			return domain.Proposal{}, err
 		}
+
+		transfers, err := s.proposals.ListTransfers(ctx, dealID)
+		if err != nil {
+			return domain.Proposal{}, err
+		}
+		for _, t := range transfers {
+			if err := s.chown.CompleteTransfer(ctx, t.ItemID, t.ToUserID); err != nil {
+				return domain.Proposal{}, err
+			}
+		}
+
+		if _, err := s.deals.UpdateStatus(ctx, dealID, domain.DealStatusCompleted); err != nil {
+			return domain.Proposal{}, err
+		}
 	}
 
 	return p, nil
@@ -254,6 +296,9 @@ func (s *Service) ensureDealOpen(ctx context.Context, d domain.Deal) error {
 	}
 	if d.DeadlineAt != nil && !d.DeadlineAt.After(time.Now()) {
 		if _, err := s.deals.UpdateStatus(ctx, d.ID, domain.DealStatusCancelled); err != nil {
+			return err
+		}
+		if err := s.proposals.DeclineAllForDeal(ctx, d.ID); err != nil {
 			return err
 		}
 		if err := s.proposals.UnlockAllForDeal(ctx, d.ID); err != nil {

@@ -26,3 +26,8 @@ type ProposalUpdate struct {
 	ItemID   *string
 	Quantity *float64
 }
+
+type ItemTransfer struct {
+	ItemID   string
+	ToUserID string
+}

@@ -16,7 +16,6 @@ type Deal struct {
 	RootItemID        string
 	CreatorID         string
 	Status            DealStatus
-	Participants      int
 	NegotiationWindow time.Duration
 	DeadlineAt        *time.Time
 	CreatedAt         time.Time
