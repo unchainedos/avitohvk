@@ -52,6 +52,19 @@ services:
         done
         echo "Migrations applied successfully"
 
+  # Добавленный сервис приложения
+  app:
+    build: .
+    container_name: avitohvk-app
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "8080:8080"  # ХОСТ:КОНТЕЙНЕР
+    networks:
+      - app-net
+    restart: unless-stopped
+
 volumes:
   postgres_data:
 
