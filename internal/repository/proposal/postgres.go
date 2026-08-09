@@ -514,13 +514,40 @@ func stillHoldsOfferedItem(ctx context.Context, tx pgx.Tx, dealID, participantID
 
 func lockOfferedItem(ctx context.Context, tx pgx.Tx, dealID, participantID string) error {
 	const q = `
+		WITH target AS (
+			SELECT t.item_id
+			FROM chain_deal_transactions cdt
+			JOIN transactions t ON t.id = cdt.transaction_id
+			WHERE cdt.deal_id = $1::uuid AND cdt.participant_id = $2::uuid
+		),
+		competing AS (
+			SELECT DISTINCT cd.id
+			FROM chain_deals cd
+			JOIN chain_deal_transactions cdt ON cdt.deal_id = cd.id
+			JOIN transactions t ON t.id = cdt.transaction_id
+			WHERE cd.status = 'PENDING'
+			  AND cd.id <> $1::uuid
+			  AND t.item_id = (SELECT item_id FROM target)
+		),
+		cancelled AS (
+			UPDATE chain_deals SET status = 'CANCELLED'
+			WHERE id IN (SELECT id FROM competing)
+			RETURNING id
+		),
+		declined AS (
+			UPDATE chain_deal_transactions
+			SET status = 'DECLINED', updated_at = now()
+			WHERE deal_id IN (SELECT id FROM cancelled) AND status <> 'DECLINED'
+			RETURNING 1
+		),
+		unlocked AS (
+			UPDATE items SET is_locked = false, locked_by_deal_id = NULL
+			WHERE locked_by_deal_id IN (SELECT id FROM cancelled)
+			RETURNING 1
+		)
 		UPDATE items
 		SET is_locked = true, locked_by_deal_id = $1::uuid
-		FROM chain_deal_transactions cdt
-		JOIN transactions t ON t.id = cdt.transaction_id
-		WHERE items.id = t.item_id
-		  AND cdt.deal_id = $1::uuid
-		  AND cdt.participant_id = $2::uuid
+		WHERE id = (SELECT item_id FROM target)
 	`
 	_, err := tx.Exec(ctx, q, dealID, participantID)
 	return err
