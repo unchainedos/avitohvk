@@ -79,7 +79,7 @@ func main() {
 		router.WithGroup([]router.RouteRegistrator{
 			chownHandler,
 			dealHandler,
-			userHandler,
+			// userHandler,
 			propsHandler,
 			router.RegistratorFunc(itemHandler.RegisterProtectedRoutes),
 			router.RegistratorFunc(wishHandler.RegisterProtectedRoutes),
