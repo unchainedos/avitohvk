@@ -218,6 +218,10 @@ func (r *Repository) SetStatus(ctx context.Context, dealID, participantID string
 		if !allowed {
 			return domain.Proposal{}, ErrOutOfOrder
 		}
+
+		if err := lockOfferedItem(ctx, tx, dealID, participantID); err != nil {
+			return domain.Proposal{}, err
+		}
 	}
 
 	const q = `
@@ -348,15 +352,6 @@ func (r *Repository) TryLockChain(ctx context.Context, dealID string) error {
 		return tx.Commit(ctx)
 	}
 
-	const qAlreadyLocked = `SELECT COALESCE(locked_by_deal_id = $2::uuid, false) FROM items WHERE id = $1::uuid`
-	var alreadyLocked bool
-	if err := tx.QueryRow(ctx, qAlreadyLocked, rootItemID, dealID).Scan(&alreadyLocked); err != nil {
-		return err
-	}
-	if alreadyLocked {
-		return tx.Commit(ctx)
-	}
-
 	const qLockItems = `
 		UPDATE items
 		SET is_locked = true, locked_by_deal_id = $2::uuid
@@ -372,29 +367,44 @@ func (r *Repository) TryLockChain(ctx context.Context, dealID string) error {
 	}
 
 	const qCancelCompeting = `
-		UPDATE chain_deals
-		SET status = 'CANCELLED'
-		WHERE status = 'PENDING'
-		  AND id <> $1::uuid
-		  AND (
-		    root_item_id IN (
-		        SELECT t.item_id
-		        FROM chain_deal_transactions cdt
-		        JOIN transactions t ON t.id = cdt.transaction_id
-		        WHERE cdt.deal_id = $1::uuid
-		    )
-		    OR id IN (
-		        SELECT cdt2.deal_id
-		        FROM chain_deal_transactions cdt2
-		        JOIN transactions t2 ON t2.id = cdt2.transaction_id
-		        WHERE t2.item_id IN (
-		            SELECT t.item_id
-		            FROM chain_deal_transactions cdt
-		            JOIN transactions t ON t.id = cdt.transaction_id
-		            WHERE cdt.deal_id = $1::uuid
-		        )
-		    )
-		  )
+		WITH competing AS (
+			SELECT id FROM chain_deals
+			WHERE status = 'PENDING'
+			  AND id <> $1::uuid
+			  AND (
+			    root_item_id IN (
+			        SELECT t.item_id
+			        FROM chain_deal_transactions cdt
+			        JOIN transactions t ON t.id = cdt.transaction_id
+			        WHERE cdt.deal_id = $1::uuid
+			    )
+			    OR id IN (
+			        SELECT cdt2.deal_id
+			        FROM chain_deal_transactions cdt2
+			        JOIN transactions t2 ON t2.id = cdt2.transaction_id
+			        WHERE t2.item_id IN (
+			            SELECT t.item_id
+			            FROM chain_deal_transactions cdt
+			            JOIN transactions t ON t.id = cdt.transaction_id
+			            WHERE cdt.deal_id = $1::uuid
+			        )
+			    )
+			  )
+		),
+		cancelled AS (
+			UPDATE chain_deals SET status = 'CANCELLED'
+			WHERE id IN (SELECT id FROM competing)
+			RETURNING id
+		),
+		declined AS (
+			UPDATE chain_deal_transactions
+			SET status = 'DECLINED', updated_at = now()
+			WHERE deal_id IN (SELECT id FROM cancelled) AND status <> 'DECLINED'
+			RETURNING 1
+		)
+		UPDATE items
+		SET is_locked = false, locked_by_deal_id = NULL
+		WHERE locked_by_deal_id IN (SELECT id FROM cancelled)
 	`
 	if _, err := tx.Exec(ctx, qCancelCompeting, dealID); err != nil {
 		return err
@@ -454,12 +464,7 @@ func (r *Repository) UnlockAllForDeal(ctx context.Context, dealID string) error 
 	const q = `
 		UPDATE items
 		SET is_locked = false, locked_by_deal_id = NULL
-		WHERE id IN (
-			SELECT t.item_id
-			FROM chain_deal_transactions cdt
-			JOIN transactions t ON t.id = cdt.transaction_id
-			WHERE cdt.deal_id = $1::uuid
-		)
+		WHERE locked_by_deal_id = $1::uuid
 	`
 	_, err := r.pool.Exec(ctx, q, dealID)
 	return err
@@ -505,6 +510,47 @@ func stillHoldsOfferedItem(ctx context.Context, tx pgx.Tx, dealID, participantID
 		return false, err
 	}
 	return stillHolds, nil
+}
+
+func lockOfferedItem(ctx context.Context, tx pgx.Tx, dealID, participantID string) error {
+	const q = `
+		WITH target AS (
+			SELECT t.item_id
+			FROM chain_deal_transactions cdt
+			JOIN transactions t ON t.id = cdt.transaction_id
+			WHERE cdt.deal_id = $1::uuid AND cdt.participant_id = $2::uuid
+		),
+		competing AS (
+			SELECT DISTINCT cd.id
+			FROM chain_deals cd
+			JOIN chain_deal_transactions cdt ON cdt.deal_id = cd.id
+			JOIN transactions t ON t.id = cdt.transaction_id
+			WHERE cd.status = 'PENDING'
+			  AND cd.id <> $1::uuid
+			  AND t.item_id = (SELECT item_id FROM target)
+		),
+		cancelled AS (
+			UPDATE chain_deals SET status = 'CANCELLED'
+			WHERE id IN (SELECT id FROM competing)
+			RETURNING id
+		),
+		declined AS (
+			UPDATE chain_deal_transactions
+			SET status = 'DECLINED', updated_at = now()
+			WHERE deal_id IN (SELECT id FROM cancelled) AND status <> 'DECLINED'
+			RETURNING 1
+		),
+		unlocked AS (
+			UPDATE items SET is_locked = false, locked_by_deal_id = NULL
+			WHERE locked_by_deal_id IN (SELECT id FROM cancelled)
+			RETURNING 1
+		)
+		UPDATE items
+		SET is_locked = true, locked_by_deal_id = $1::uuid
+		WHERE id = (SELECT item_id FROM target)
+	`
+	_, err := tx.Exec(ctx, q, dealID, participantID)
+	return err
 }
 
 func isApprovalAllowed(ctx context.Context, tx pgx.Tx, dealID, participantID string) (bool, error) {

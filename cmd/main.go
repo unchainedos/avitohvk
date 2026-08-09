@@ -79,11 +79,11 @@ func main() {
 		router.WithGroup([]router.RouteRegistrator{
 			chownHandler,
 			dealHandler,
-			// userHandler,
 			propsHandler,
 			router.RegistratorFunc(itemHandler.RegisterProtectedRoutes),
 			router.RegistratorFunc(wishHandler.RegisterProtectedRoutes),
 			router.RegistratorFunc(usersHandler.RegisterProtectedRoutes),
+			router.RegistratorFunc(userHandler.RegisterProtectedRoutes),
 		}, middleware.NewJWTAuth([]byte(cfg.JWT.Secret), logger)),
 	)
 
