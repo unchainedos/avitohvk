@@ -65,10 +65,10 @@ func (s *Service) Chown(ctx context.Context, actorID, itemID string, req dto.Cho
 		return dto.ChownResponse{}, err
 	}
 
-	return toChownResponse(result), nil
+	return toChownResponse(&result), nil
 }
 
-func toChownResponse(c domain.Chown) dto.ChownResponse {
+func toChownResponse(c *domain.Chown) dto.ChownResponse {
 	hops := make([]dto.ChownHop, 0, len(c.Hops))
 	for _, h := range c.Hops {
 		hops = append(hops, dto.ChownHop{ItemID: h.ItemID, Quantity: h.Quantity, ToUserID: h.ToUserID})
