@@ -371,30 +371,50 @@ func (r *Repository) TryLockChain(ctx context.Context, dealID string) error {
 		return err
 	}
 
+	// Cancelling a competing deal must also decline its own proposals and free any
+	// items it exclusively held a lock on — otherwise those proposals are left
+	// dangling in a non-terminal (or even ACCEPTED) status under a CANCELLED deal,
+	// the same class of bug fixed for withdrawal and deadline expiry. All of it
+	// runs as one statement so it stays atomic with the item-locking above.
 	const qCancelCompeting = `
-		UPDATE chain_deals
-		SET status = 'CANCELLED'
-		WHERE status = 'PENDING'
-		  AND id <> $1::uuid
-		  AND (
-		    root_item_id IN (
-		        SELECT t.item_id
-		        FROM chain_deal_transactions cdt
-		        JOIN transactions t ON t.id = cdt.transaction_id
-		        WHERE cdt.deal_id = $1::uuid
-		    )
-		    OR id IN (
-		        SELECT cdt2.deal_id
-		        FROM chain_deal_transactions cdt2
-		        JOIN transactions t2 ON t2.id = cdt2.transaction_id
-		        WHERE t2.item_id IN (
-		            SELECT t.item_id
-		            FROM chain_deal_transactions cdt
-		            JOIN transactions t ON t.id = cdt.transaction_id
-		            WHERE cdt.deal_id = $1::uuid
-		        )
-		    )
-		  )
+		WITH competing AS (
+			SELECT id FROM chain_deals
+			WHERE status = 'PENDING'
+			  AND id <> $1::uuid
+			  AND (
+			    root_item_id IN (
+			        SELECT t.item_id
+			        FROM chain_deal_transactions cdt
+			        JOIN transactions t ON t.id = cdt.transaction_id
+			        WHERE cdt.deal_id = $1::uuid
+			    )
+			    OR id IN (
+			        SELECT cdt2.deal_id
+			        FROM chain_deal_transactions cdt2
+			        JOIN transactions t2 ON t2.id = cdt2.transaction_id
+			        WHERE t2.item_id IN (
+			            SELECT t.item_id
+			            FROM chain_deal_transactions cdt
+			            JOIN transactions t ON t.id = cdt.transaction_id
+			            WHERE cdt.deal_id = $1::uuid
+			        )
+			    )
+			  )
+		),
+		cancelled AS (
+			UPDATE chain_deals SET status = 'CANCELLED'
+			WHERE id IN (SELECT id FROM competing)
+			RETURNING id
+		),
+		declined AS (
+			UPDATE chain_deal_transactions
+			SET status = 'DECLINED', updated_at = now()
+			WHERE deal_id IN (SELECT id FROM cancelled) AND status <> 'DECLINED'
+			RETURNING 1
+		)
+		UPDATE items
+		SET is_locked = false, locked_by_deal_id = NULL
+		WHERE locked_by_deal_id IN (SELECT id FROM cancelled)
 	`
 	if _, err := tx.Exec(ctx, qCancelCompeting, dealID); err != nil {
 		return err

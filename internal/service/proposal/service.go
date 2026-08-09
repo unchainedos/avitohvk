@@ -11,9 +11,24 @@ import (
 	statusErrors "avitohvk/internal/errors"
 	dealrepo "avitohvk/internal/repository/deal"
 	proposalrepo "avitohvk/internal/repository/proposal"
+
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 const defaultNegotiationWindow = 24 * time.Hour
+
+// maxLockChainRetries bounds retries of TryLockChain on a Postgres deadlock.
+// TryLockChain is the one place that reaches across into another (competing)
+// deal's rows and into shared items, so it's the only step that can deadlock
+// against a concurrent close of a different, overlapping deal. A deadlock
+// victim's transaction is always cleanly rolled back by Postgres, so retrying
+// is safe — there is no risk of double-applying any of its effects.
+const maxLockChainRetries = 3
+
+func isDeadlock(err error) bool {
+	var pgErr *pgconn.PgError
+	return errors.As(err, &pgErr) && pgErr.Code == "40P01"
+}
 
 type DealRepository interface {
 	Create(ctx context.Context, rootItemID, creatorID string, negotiationWindow time.Duration) (domain.Deal, error)
@@ -259,8 +274,15 @@ func (s *Service) Approve(ctx context.Context, actorID, dealID string) (domain.P
 		return domain.Proposal{}, err
 	}
 
-	if err := s.proposals.TryLockChain(ctx, dealID); err != nil {
-		return domain.Proposal{}, err
+	var lockErr error
+	for attempt := 0; attempt <= maxLockChainRetries; attempt++ {
+		lockErr = s.proposals.TryLockChain(ctx, dealID)
+		if lockErr == nil || !isDeadlock(lockErr) {
+			break
+		}
+	}
+	if lockErr != nil {
+		return domain.Proposal{}, lockErr
 	}
 
 	allAccepted, err := s.proposals.AllAccepted(ctx, dealID)
