@@ -148,8 +148,6 @@ func TestNewJWTAuth(t *testing.T) {
 	}
 }
 
-// parentCtxKey is a distinct type from the middleware's own unexported
-// ctxKey, so this cannot accidentally collide with userIDKey.
 type parentCtxKey struct{}
 
 func TestNewJWTAuth_PreservesParentContext(t *testing.T) {
