@@ -227,7 +227,7 @@ func (s *Service) WithdrawProposal(ctx context.Context, actorID, dealID string) 
 		return err
 	}
 
-	if _, err := s.deals.UpdateStatus(ctx, dealID, domain.DealStatusCancelled); err != nil {
+	if _, err := s.deals.UpdateStatus(ctx, dealID, domain.DealStatusCanceled); err != nil {
 		return err
 	}
 	if err := s.proposals.DeclineAllExcept(ctx, dealID, actorID); err != nil {
@@ -325,7 +325,7 @@ func (s *Service) ensureDealOpen(ctx context.Context, d domain.Deal) error {
 		return fmt.Errorf("%w: deal is not open", statusErrors.ErrConflict)
 	}
 	if d.DeadlineAt != nil && !d.DeadlineAt.After(time.Now()) {
-		if _, err := s.deals.UpdateStatus(ctx, d.ID, domain.DealStatusCancelled); err != nil {
+		if _, err := s.deals.UpdateStatus(ctx, d.ID, domain.DealStatusCanceled); err != nil {
 			return err
 		}
 		if err := s.proposals.DeclineAllForDeal(ctx, d.ID); err != nil {

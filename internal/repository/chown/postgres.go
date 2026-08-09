@@ -32,7 +32,7 @@ func (r *Repository) Chown(ctx context.Context, actorID, itemID string, offers [
 	if err != nil {
 		return domain.Chown{}, err
 	}
-	defer tx.Rollback(ctx)
+	defer func() { _ = tx.Rollback(ctx) }()
 
 	if err := claimExclusiveRights(ctx, tx, itemID, actorID); err != nil {
 		return domain.Chown{}, err
@@ -179,7 +179,7 @@ func (r *Repository) CompleteTransfer(ctx context.Context, itemID, toUserID stri
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback(ctx)
+	defer func() { _ = tx.Rollback(ctx) }()
 
 	const qTransfer = `
 		UPDATE items

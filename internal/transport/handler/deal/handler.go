@@ -40,7 +40,7 @@ func (h *DealHandler) Get(w http.ResponseWriter, r *http.Request) {
 		utilhttp.WriteError(w, err)
 		return
 	}
-	utilhttp.WriteJSON(w, http.StatusOK, toDealResponse(d))
+	_ = utilhttp.WriteJSON(w, http.StatusOK, toDealResponse(d))
 }
 
 func toDealResponse(d domain.Deal) dto.DealResponse {

@@ -75,7 +75,7 @@ func (r *Repository) LockDeal(ctx context.Context, dealID string) (func(context.
 		return nil, err
 	}
 	return func(unlockCtx context.Context) {
-		conn.Exec(unlockCtx, `SELECT pg_advisory_unlock(hashtextextended($1, 0))`, dealID)
+		_, _ = conn.Exec(unlockCtx, `SELECT pg_advisory_unlock(hashtextextended($1, 0))`, dealID)
 		conn.Release()
 	}, nil
 }

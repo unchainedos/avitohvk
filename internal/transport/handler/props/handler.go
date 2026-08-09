@@ -57,7 +57,7 @@ func (h *PropsHandler) CreateDeal(w http.ResponseWriter, r *http.Request) {
 		utilhttp.WriteError(w, err)
 		return
 	}
-	utilhttp.WriteJSON(w, http.StatusCreated, toProposalResponse(p))
+	_ = utilhttp.WriteJSON(w, http.StatusCreated, toProposalResponse(p))
 }
 
 func (h *PropsHandler) Create(w http.ResponseWriter, r *http.Request) {
@@ -77,7 +77,7 @@ func (h *PropsHandler) Create(w http.ResponseWriter, r *http.Request) {
 		utilhttp.WriteError(w, err)
 		return
 	}
-	utilhttp.WriteJSON(w, http.StatusCreated, toProposalResponse(p))
+	_ = utilhttp.WriteJSON(w, http.StatusCreated, toProposalResponse(p))
 }
 
 func (h *PropsHandler) Get(w http.ResponseWriter, r *http.Request) {
@@ -92,7 +92,7 @@ func (h *PropsHandler) Get(w http.ResponseWriter, r *http.Request) {
 		utilhttp.WriteError(w, err)
 		return
 	}
-	utilhttp.WriteJSON(w, http.StatusOK, toProposalResponse(p))
+	_ = utilhttp.WriteJSON(w, http.StatusOK, toProposalResponse(p))
 }
 
 func (h *PropsHandler) Update(w http.ResponseWriter, r *http.Request) {
@@ -115,7 +115,7 @@ func (h *PropsHandler) Update(w http.ResponseWriter, r *http.Request) {
 		utilhttp.WriteError(w, err)
 		return
 	}
-	utilhttp.WriteJSON(w, http.StatusOK, toProposalResponse(p))
+	_ = utilhttp.WriteJSON(w, http.StatusOK, toProposalResponse(p))
 }
 
 func (h *PropsHandler) Delete(w http.ResponseWriter, r *http.Request) {
@@ -148,7 +148,7 @@ func (h *PropsHandler) GetByUser(w http.ResponseWriter, r *http.Request) {
 	for _, p := range list {
 		resp.Proposals = append(resp.Proposals, toProposalResponse(p))
 	}
-	utilhttp.WriteJSON(w, http.StatusOK, resp)
+	_ = utilhttp.WriteJSON(w, http.StatusOK, resp)
 }
 
 func (h *PropsHandler) Approve(w http.ResponseWriter, r *http.Request) {
@@ -163,7 +163,7 @@ func (h *PropsHandler) Approve(w http.ResponseWriter, r *http.Request) {
 		utilhttp.WriteError(w, err)
 		return
 	}
-	utilhttp.WriteJSON(w, http.StatusOK, toProposalResponse(p))
+	_ = utilhttp.WriteJSON(w, http.StatusOK, toProposalResponse(p))
 }
 
 func toProposalResponse(p domain.Proposal) dto.ProposalResponse {

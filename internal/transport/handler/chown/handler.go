@@ -45,5 +45,5 @@ func (h *ChownHandler) Chown(w http.ResponseWriter, r *http.Request) {
 		utilhttp.WriteError(w, err)
 		return
 	}
-	utilhttp.WriteJSON(w, http.StatusCreated, resp)
+	_ = utilhttp.WriteJSON(w, http.StatusCreated, resp)
 }
