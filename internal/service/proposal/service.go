@@ -45,7 +45,7 @@ type DealRepository interface {
 	LockDeal(ctx context.Context, dealID string) (func(context.Context), error)
 }
 
-type ProposalRepository interface {
+type Repository interface {
 	Create(ctx context.Context, dealID, participantID, itemID string, quantity float64) (domain.Proposal, error)
 	GetByDealAndParticipant(ctx context.Context, dealID, participantID string) (domain.Proposal, error)
 	Update(ctx context.Context, dealID, participantID string, upd domain.ProposalUpdate) (domain.Proposal, error)
@@ -65,11 +65,11 @@ type ChownRepository interface {
 
 type Service struct {
 	deals     DealRepository
-	proposals ProposalRepository
+	proposals Repository
 	chown     ChownRepository
 }
 
-func NewService(deals DealRepository, proposals ProposalRepository, chown ChownRepository) *Service {
+func NewService(deals DealRepository, proposals Repository, chown ChownRepository) *Service {
 	return &Service{deals: deals, proposals: proposals, chown: chown}
 }
 
@@ -117,7 +117,7 @@ func (s *Service) CreateProposal(ctx context.Context, actorID, dealID string, re
 	if err != nil {
 		return domain.Proposal{}, err
 	}
-	if err := s.ensureDealOpen(ctx, d); err != nil {
+	if err := s.ensureDealOpen(ctx, &d); err != nil {
 		return domain.Proposal{}, err
 	}
 
@@ -227,7 +227,7 @@ func (s *Service) WithdrawProposal(ctx context.Context, actorID, dealID string) 
 		return err
 	}
 
-	if _, err := s.deals.UpdateStatus(ctx, dealID, domain.DealStatusCancelled); err != nil {
+	if _, err := s.deals.UpdateStatus(ctx, dealID, domain.DealStatusCanceled); err != nil {
 		return err
 	}
 	if err := s.proposals.DeclineAllExcept(ctx, dealID, actorID); err != nil {
@@ -261,7 +261,7 @@ func (s *Service) Approve(ctx context.Context, actorID, dealID string) (domain.P
 	if err != nil {
 		return domain.Proposal{}, err
 	}
-	if err := s.ensureDealOpen(ctx, d); err != nil {
+	if err := s.ensureDealOpen(ctx, &d); err != nil {
 		return domain.Proposal{}, err
 	}
 
@@ -320,12 +320,12 @@ func (s *Service) Approve(ctx context.Context, actorID, dealID string) (domain.P
 	return p, nil
 }
 
-func (s *Service) ensureDealOpen(ctx context.Context, d domain.Deal) error {
+func (s *Service) ensureDealOpen(ctx context.Context, d *domain.Deal) error {
 	if d.Status != domain.DealStatusPending {
 		return fmt.Errorf("%w: deal is not open", statusErrors.ErrConflict)
 	}
 	if d.DeadlineAt != nil && !d.DeadlineAt.After(time.Now()) {
-		if _, err := s.deals.UpdateStatus(ctx, d.ID, domain.DealStatusCancelled); err != nil {
+		if _, err := s.deals.UpdateStatus(ctx, d.ID, domain.DealStatusCanceled); err != nil {
 			return err
 		}
 		if err := s.proposals.DeclineAllForDeal(ctx, d.ID); err != nil {

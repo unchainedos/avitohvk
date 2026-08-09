@@ -75,7 +75,7 @@ func WriteError(w http.ResponseWriter, err error) {
 		message = "internal server error"
 	}
 
-	WriteJSON(w, status, statusErrors.ErrorResponse{Message: message})
+	_ = WriteJSON(w, status, statusErrors.ErrorResponse{Message: message})
 }
 
 func GenerateToken(userID string, secret []byte, ttl time.Duration) (string, error) {

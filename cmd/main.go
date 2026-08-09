@@ -61,11 +61,16 @@ func main() {
 	userRepository := userrepo.NewRepository(pool)
 	itemRepository := itemrepo.NewRepository(pool)
 	wishRepository := wishrepo.NewRepository(pool)
+	chownRepo := chownrepo.NewRepository(pool)
+	dealRepo := dealrepo.NewRepository(pool)
+	proposalRepo := proposalrepo.NewRepository(pool)
 
 	searchSvc := searchservice.NewService(searchRepository)
 	userSvc := userservice.NewService(userRepository, []byte(cfg.JWT.Secret), jwtTTL)
 	itemSvc := itemservice.NewService(itemRepository)
 	wishSvc := wishservice.NewService(wishRepository)
+	chownSvc := chownservice.NewService(chownRepo)
+	proposalSvc := proposalservice.NewService(dealRepo, proposalRepo, chownRepo)
 
 	searchHandler := search.New(searchSvc)
 	authHandler := auth.New(userSvc, jwtTTL)
@@ -73,12 +78,7 @@ func main() {
 	itemHandler := item.New(itemSvc)
 	wishHandler := wish.New(wishSvc)
 	usersHandler := users.New(itemSvc)
-
-	chownRepo := chownrepo.NewRepository(pool)
-	chownSvc := chownservice.NewService(chownRepo)
 	chownHandler := chown.New(chownSvc)
-
-	proposalSvc := proposalservice.NewService(dealrepo.NewRepository(pool), proposalrepo.NewRepository(pool), chownRepo)
 	dealHandler := deal.New(proposalSvc)
 	propsHandler := props.New(proposalSvc)
 

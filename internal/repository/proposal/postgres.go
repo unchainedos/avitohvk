@@ -39,7 +39,7 @@ func (r *Repository) Create(ctx context.Context, dealID, participantID, itemID s
 	if err != nil {
 		return domain.Proposal{}, err
 	}
-	defer tx.Rollback(ctx)
+	defer func() { _ = tx.Rollback(ctx) }()
 
 	const qDeal = `
 		SELECT (root_item_id = $2::uuid), negotiation_window_seconds, deadline_at
@@ -131,7 +131,7 @@ func (r *Repository) Update(ctx context.Context, dealID, participantID string, u
 	if err != nil {
 		return domain.Proposal{}, err
 	}
-	defer tx.Rollback(ctx)
+	defer func() { _ = tx.Rollback(ctx) }()
 
 	if err := lockPending(ctx, tx, dealID, participantID); err != nil {
 		return domain.Proposal{}, err
@@ -158,7 +158,6 @@ func (r *Repository) Update(ctx context.Context, dealID, participantID string, u
 	if upd.Quantity != nil {
 		sets = append(sets, fmt.Sprintf("quantity = $%d", n))
 		args = append(args, *upd.Quantity)
-		n++
 	}
 	if len(sets) == 0 {
 		if err := tx.Commit(ctx); err != nil {
@@ -196,7 +195,7 @@ func (r *Repository) SetStatus(ctx context.Context, dealID, participantID string
 	if err != nil {
 		return domain.Proposal{}, err
 	}
-	defer tx.Rollback(ctx)
+	defer func() { _ = tx.Rollback(ctx) }()
 
 	if err := lockPending(ctx, tx, dealID, participantID); err != nil {
 		return domain.Proposal{}, err
@@ -309,7 +308,7 @@ func (r *Repository) TryLockChain(ctx context.Context, dealID string) error {
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback(ctx)
+	defer func() { _ = tx.Rollback(ctx) }()
 
 	const qDeal = `
 		SELECT creator_id::text, root_item_id::text
@@ -391,7 +390,7 @@ func (r *Repository) TryLockChain(ctx context.Context, dealID string) error {
 			    )
 			  )
 		),
-		cancelled AS (
+		canceled AS (
 			UPDATE chain_deals SET status = 'CANCELLED'
 			WHERE id IN (SELECT id FROM competing)
 			RETURNING id
@@ -399,12 +398,12 @@ func (r *Repository) TryLockChain(ctx context.Context, dealID string) error {
 		declined AS (
 			UPDATE chain_deal_transactions
 			SET status = 'DECLINED', updated_at = now()
-			WHERE deal_id IN (SELECT id FROM cancelled) AND status <> 'DECLINED'
+			WHERE deal_id IN (SELECT id FROM canceled) AND status <> 'DECLINED'
 			RETURNING 1
 		)
 		UPDATE items
 		SET is_locked = false, locked_by_deal_id = NULL
-		WHERE locked_by_deal_id IN (SELECT id FROM cancelled)
+		WHERE locked_by_deal_id IN (SELECT id FROM canceled)
 	`
 	if _, err := tx.Exec(ctx, qCancelCompeting, dealID); err != nil {
 		return err
@@ -529,7 +528,7 @@ func lockOfferedItem(ctx context.Context, tx pgx.Tx, dealID, participantID strin
 			  AND cd.id <> $1::uuid
 			  AND t.item_id = (SELECT item_id FROM target)
 		),
-		cancelled AS (
+		canceled AS (
 			UPDATE chain_deals SET status = 'CANCELLED'
 			WHERE id IN (SELECT id FROM competing)
 			RETURNING id
@@ -537,12 +536,12 @@ func lockOfferedItem(ctx context.Context, tx pgx.Tx, dealID, participantID strin
 		declined AS (
 			UPDATE chain_deal_transactions
 			SET status = 'DECLINED', updated_at = now()
-			WHERE deal_id IN (SELECT id FROM cancelled) AND status <> 'DECLINED'
+			WHERE deal_id IN (SELECT id FROM canceled) AND status <> 'DECLINED'
 			RETURNING 1
 		),
 		unlocked AS (
 			UPDATE items SET is_locked = false, locked_by_deal_id = NULL
-			WHERE locked_by_deal_id IN (SELECT id FROM cancelled)
+			WHERE locked_by_deal_id IN (SELECT id FROM canceled)
 			RETURNING 1
 		)
 		UPDATE items

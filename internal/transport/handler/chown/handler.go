@@ -12,23 +12,23 @@ import (
 	"github.com/go-chi/chi/v5"
 )
 
-type ChownService interface {
+type Service interface {
 	Chown(ctx context.Context, actorID, itemID string, req dto.ChownRequest) (dto.ChownResponse, error)
 }
 
-type ChownHandler struct {
-	service ChownService
+type Handler struct {
+	service Service
 }
 
-func New(service ChownService) *ChownHandler {
-	return &ChownHandler{service: service}
+func New(service Service) *Handler {
+	return &Handler{service: service}
 }
 
-func (h *ChownHandler) RegisterRoutes(r chi.Router) {
+func (h *Handler) RegisterRoutes(r chi.Router) {
 	r.Post("/chown/{item_id}", h.Chown)
 }
 
-func (h *ChownHandler) Chown(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) Chown(w http.ResponseWriter, r *http.Request) {
 	actorID, ok := middleware.UserIDFromContext(r.Context())
 	if !ok {
 		utilhttp.WriteError(w, statusErrors.ErrUnauthorized)
@@ -45,5 +45,5 @@ func (h *ChownHandler) Chown(w http.ResponseWriter, r *http.Request) {
 		utilhttp.WriteError(w, err)
 		return
 	}
-	utilhttp.WriteJSON(w, http.StatusCreated, resp)
+	_ = utilhttp.WriteJSON(w, http.StatusCreated, resp)
 }
