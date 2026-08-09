@@ -13,7 +13,7 @@ import (
 	"github.com/go-chi/chi/v5"
 )
 
-type PropsService interface {
+type Service interface {
 	CreateDeal(ctx context.Context, actorID string, req dto.CreateDealRequest) (domain.Proposal, error)
 	CreateProposal(ctx context.Context, actorID, dealID string, req dto.CreateProposalRequest) (domain.Proposal, error)
 	GetProposal(ctx context.Context, actorID, dealID string) (domain.Proposal, error)
@@ -23,15 +23,15 @@ type PropsService interface {
 	Approve(ctx context.Context, actorID, dealID string) (domain.Proposal, error)
 }
 
-type PropsHandler struct {
-	service PropsService
+type Handler struct {
+	service Service
 }
 
-func New(service PropsService) *PropsHandler {
-	return &PropsHandler{service: service}
+func New(service Service) *Handler {
+	return &Handler{service: service}
 }
 
-func (h *PropsHandler) RegisterRoutes(r chi.Router) {
+func (h *Handler) RegisterRoutes(r chi.Router) {
 	r.Post("/props/", h.CreateDeal)
 	r.Get("/props/{deal_id}", h.Get)
 	r.Patch("/props/{deal_id}", h.Update)
@@ -41,7 +41,7 @@ func (h *PropsHandler) RegisterRoutes(r chi.Router) {
 	r.Post("/props/approve/{deal_id}", h.Approve)
 }
 
-func (h *PropsHandler) CreateDeal(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) CreateDeal(w http.ResponseWriter, r *http.Request) {
 	actorID, ok := middleware.UserIDFromContext(r.Context())
 	if !ok {
 		utilhttp.WriteError(w, statusErrors.ErrUnauthorized)
@@ -60,7 +60,7 @@ func (h *PropsHandler) CreateDeal(w http.ResponseWriter, r *http.Request) {
 	_ = utilhttp.WriteJSON(w, http.StatusCreated, toProposalResponse(&p))
 }
 
-func (h *PropsHandler) Create(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 	actorID, ok := middleware.UserIDFromContext(r.Context())
 	if !ok {
 		utilhttp.WriteError(w, statusErrors.ErrUnauthorized)
@@ -80,7 +80,7 @@ func (h *PropsHandler) Create(w http.ResponseWriter, r *http.Request) {
 	_ = utilhttp.WriteJSON(w, http.StatusCreated, toProposalResponse(&p))
 }
 
-func (h *PropsHandler) Get(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
 	actorID, ok := middleware.UserIDFromContext(r.Context())
 	if !ok {
 		utilhttp.WriteError(w, statusErrors.ErrUnauthorized)
@@ -95,7 +95,7 @@ func (h *PropsHandler) Get(w http.ResponseWriter, r *http.Request) {
 	_ = utilhttp.WriteJSON(w, http.StatusOK, toProposalResponse(&p))
 }
 
-func (h *PropsHandler) Update(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 	actorID, ok := middleware.UserIDFromContext(r.Context())
 	if !ok {
 		utilhttp.WriteError(w, statusErrors.ErrUnauthorized)
@@ -118,7 +118,7 @@ func (h *PropsHandler) Update(w http.ResponseWriter, r *http.Request) {
 	_ = utilhttp.WriteJSON(w, http.StatusOK, toProposalResponse(&p))
 }
 
-func (h *PropsHandler) Delete(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) Delete(w http.ResponseWriter, r *http.Request) {
 	actorID, ok := middleware.UserIDFromContext(r.Context())
 	if !ok {
 		utilhttp.WriteError(w, statusErrors.ErrUnauthorized)
@@ -132,7 +132,7 @@ func (h *PropsHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-func (h *PropsHandler) GetByUser(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) GetByUser(w http.ResponseWriter, r *http.Request) {
 	actorID, ok := middleware.UserIDFromContext(r.Context())
 	if !ok {
 		utilhttp.WriteError(w, statusErrors.ErrUnauthorized)
@@ -151,7 +151,7 @@ func (h *PropsHandler) GetByUser(w http.ResponseWriter, r *http.Request) {
 	_ = utilhttp.WriteJSON(w, http.StatusOK, resp)
 }
 
-func (h *PropsHandler) Approve(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) Approve(w http.ResponseWriter, r *http.Request) {
 	actorID, ok := middleware.UserIDFromContext(r.Context())
 	if !ok {
 		utilhttp.WriteError(w, statusErrors.ErrUnauthorized)
