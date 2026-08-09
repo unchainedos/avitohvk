@@ -60,7 +60,7 @@ func (s *Server) FullShutdownTimeout(logger *slog.Logger) error {
 	logger.Info("Shutting down server...\n")
 
 	if err := s.internalServer.Shutdown(ctx); err != nil {
-		return fmt.Errorf("server shutdown filed: %w", err)
+		return fmt.Errorf("server shutdown failed: %w", err)
 	}
 
 	return nil
@@ -75,8 +75,8 @@ func (s *Server) GracefulShutdown(logger *slog.Logger) {
 	select {
 	case <-osInterruptChan:
 		logger.Info("server interrupted by system or user")
-	case <-s.channelErr:
-		logger.Error("server error occurred", slog.Any("error", <-s.channelErr))
+	case err := <-s.channelErr:
+		logger.Error("server error occurred", slog.Any("error", err))
 	case <-timeoutChan:
 		logger.Info("shutdown timeout reached")
 	}
