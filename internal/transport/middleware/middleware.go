@@ -69,3 +69,13 @@ func UserIDFromContext(ctx context.Context) (string, bool) {
 	id, ok := ctx.Value(userIDKey).(string)
 	return id, ok
 }
+
+// ContextWithUserID returns a copy of ctx carrying userID exactly as
+// NewJWTAuth's handler would set it after successfully validating a
+// request. It exists so handler-package tests can simulate an
+// authenticated request without needing to sign a real JWT and drive it
+// through the middleware; userIDKey is unexported, so this is the only way
+// for another package's tests to construct such a context.
+func ContextWithUserID(ctx context.Context, userID string) context.Context {
+	return context.WithValue(ctx, userIDKey, userID)
+}

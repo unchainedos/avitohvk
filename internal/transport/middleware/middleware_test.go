@@ -237,3 +237,27 @@ func TestUserIDFromContext(t *testing.T) {
 		})
 	}
 }
+
+func TestContextWithUserID_RoundTripsWithUserIDFromContext(t *testing.T) {
+	t.Parallel()
+
+	ctx := ContextWithUserID(context.Background(), "user-abc")
+	gotID, gotOK := UserIDFromContext(ctx)
+	if !gotOK {
+		t.Fatalf("UserIDFromContext() ok = false after ContextWithUserID")
+	}
+	if gotID != "user-abc" {
+		t.Errorf("UserIDFromContext() = %q, want %q", gotID, "user-abc")
+	}
+}
+
+func TestContextWithUserID_PreservesParentValues(t *testing.T) {
+	t.Parallel()
+
+	parent := context.WithValue(context.Background(), parentCtxKey{}, "parent-value")
+	ctx := ContextWithUserID(parent, "user-abc")
+
+	if got := ctx.Value(parentCtxKey{}); got != "parent-value" {
+		t.Errorf("parent context value = %v, want %q", got, "parent-value")
+	}
+}
