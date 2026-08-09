@@ -15,6 +15,12 @@ import (
 var (
 	ErrNotFound         = errors.New("deal not found")
 	ErrRootItemNotFound = errors.New("root item not found")
+	ErrCreatorNotFound  = errors.New("creator not found")
+)
+
+const (
+	fkConstraintRootItem = "fk_chain_deals_root_item"
+	fkConstraintCreator  = "chain_deals_creator_id_fkey"
 )
 
 type Repository struct {
@@ -37,7 +43,12 @@ func (r *Repository) Create(ctx context.Context, rootItemID, creatorID string, n
 	if err != nil {
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) && pgErr.Code == "23503" {
-			return domain.Deal{}, ErrRootItemNotFound
+			switch pgErr.ConstraintName {
+			case fkConstraintRootItem:
+				return domain.Deal{}, ErrRootItemNotFound
+			case fkConstraintCreator:
+				return domain.Deal{}, ErrCreatorNotFound
+			}
 		}
 		return domain.Deal{}, err
 	}

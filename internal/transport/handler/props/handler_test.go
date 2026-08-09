@@ -247,6 +247,9 @@ func TestHandler_CreateDeal_Success(t *testing.T) {
 	if svc.gotCreateDealReq != wantReq {
 		t.Errorf("req = %+v, want %+v", svc.gotCreateDealReq, wantReq)
 	}
+	if ct := rec.Header().Get("Content-Type"); ct != "application/json" {
+		t.Errorf("Content-Type = %q, want application/json", ct)
+	}
 	var got dto.ProposalResponse
 	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
 		t.Fatalf("response is not valid JSON: %v", err)
@@ -347,6 +350,9 @@ func TestHandler_Create_Success(t *testing.T) {
 	if svc.gotCreateProposalReq != wantReq {
 		t.Errorf("req = %+v, want %+v", svc.gotCreateProposalReq, wantReq)
 	}
+	if ct := rec.Header().Get("Content-Type"); ct != "application/json" {
+		t.Errorf("Content-Type = %q, want application/json", ct)
+	}
 	var got dto.ProposalResponse
 	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
 		t.Fatalf("response is not valid JSON: %v", err)
@@ -424,6 +430,9 @@ func TestHandler_Get_Success(t *testing.T) {
 	}
 	if svc.gotGetActorID != "actor-1" || svc.gotGetDealID != "deal-1" {
 		t.Errorf("actorID/dealID = %q/%q, want actor-1/deal-1", svc.gotGetActorID, svc.gotGetDealID)
+	}
+	if ct := rec.Header().Get("Content-Type"); ct != "application/json" {
+		t.Errorf("Content-Type = %q, want application/json", ct)
 	}
 	var got dto.ProposalResponse
 	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
@@ -572,6 +581,9 @@ func TestHandler_Update_Success(t *testing.T) {
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d, body=%s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	if ct := rec.Header().Get("Content-Type"); ct != "application/json" {
+		t.Errorf("Content-Type = %q, want application/json", ct)
 	}
 	var got dto.ProposalResponse
 	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
@@ -732,6 +744,9 @@ func TestHandler_GetByUser_Success(t *testing.T) {
 	for i, w := range want {
 		assertProposalResponse(t, got.Proposals[i], w)
 	}
+	if ct := rec.Header().Get("Content-Type"); ct != "application/json" {
+		t.Errorf("Content-Type = %q, want application/json", ct)
+	}
 }
 
 func TestHandler_GetByUser_EmptyListProducesEmptyArrayNotNull(t *testing.T) {
@@ -826,6 +841,9 @@ func TestHandler_Approve_Success(t *testing.T) {
 		t.Fatalf("response is not valid JSON: %v", err)
 	}
 	assertProposalResponse(t, got, want)
+	if ct := rec.Header().Get("Content-Type"); ct != "application/json" {
+		t.Errorf("Content-Type = %q, want application/json", ct)
+	}
 }
 
 func TestHandler_WrongMethodIsNotAllowed(t *testing.T) {
