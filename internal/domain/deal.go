@@ -8,7 +8,7 @@ const (
 	DealStatusPending   DealStatus = "PENDING"
 	DealStatusConfirmed DealStatus = "CONFIRMED"
 	DealStatusCompleted DealStatus = "COMPLETED"
-	DealStatusCanceled  DealStatus = "CANCELED"
+	DealStatusCanceled  DealStatus = "CANCELLED"
 )
 
 type Deal struct {

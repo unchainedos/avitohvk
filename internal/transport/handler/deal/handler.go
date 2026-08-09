@@ -40,10 +40,10 @@ func (h *DealHandler) Get(w http.ResponseWriter, r *http.Request) {
 		utilhttp.WriteError(w, err)
 		return
 	}
-	_ = utilhttp.WriteJSON(w, http.StatusOK, toDealResponse(d))
+	_ = utilhttp.WriteJSON(w, http.StatusOK, toDealResponse(&d))
 }
 
-func toDealResponse(d domain.Deal) dto.DealResponse {
+func toDealResponse(d *domain.Deal) dto.DealResponse {
 	return dto.DealResponse{
 		ID:                       d.ID,
 		RootItemID:               d.RootItemID,
