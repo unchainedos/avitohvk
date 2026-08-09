@@ -64,6 +64,18 @@ func main() {
 	wishHandler := wish.New(wishSvc)
 	usersHandler := users.New(itemSvc)
 
+	chownRepo := chownrepo.NewRepository(pool)
+	chownSvc := chownservice.NewService(chownRepo)
+	chownHandler := chown.New(chownSvc)
+
+	proposalSvc := proposalservice.NewService(dealrepo.NewRepository(pool), proposalrepo.NewRepository(pool), chownRepo)
+	dealHandler := deal.New(proposalSvc)
+	propsHandler := props.New(proposalSvc)
+
+	itemHandler := item.New()
+	wishHandler := wish.New()
+	usersHandler := users.New()
+
 	handler := router.New(
 		router.WithGroup([]router.RouteRegistrator{
 			authHandler,
@@ -74,13 +86,13 @@ func main() {
 			router.RegistratorFunc(userHandler.RegisterPublicRoutes),
 		}),
 		router.WithGroup([]router.RouteRegistrator{
-			chown.New(),
-			deal.New(),
-			router.RegistratorFunc(userHandler.RegisterProtectedRoutes),
-			props.New(),
+			chownHandler,
+			dealHandler,
+			propsHandler,
 			router.RegistratorFunc(itemHandler.RegisterProtectedRoutes),
 			router.RegistratorFunc(wishHandler.RegisterProtectedRoutes),
 			router.RegistratorFunc(usersHandler.RegisterProtectedRoutes),
+			router.RegistratorFunc(userHandler.RegisterProtectedRoutes),
 		}, middleware.NewJWTAuth([]byte(cfg.JWT.Secret), logger)),
 	)
 

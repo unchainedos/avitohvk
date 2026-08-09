@@ -5,10 +5,12 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"log/slog"
 	"net/http"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 type UserClaims struct {
@@ -48,6 +50,7 @@ func WriteError(w http.ResponseWriter, err error) {
 	}
 
 	status := http.StatusInternalServerError
+	message := err.Error()
 	switch {
 	case errors.Is(err, statusErrors.ErrBadRequest):
 		status = http.StatusBadRequest
@@ -57,9 +60,20 @@ func WriteError(w http.ResponseWriter, err error) {
 		status = http.StatusNotFound
 	case errors.Is(err, statusErrors.ErrConflict):
 		status = http.StatusConflict
+	default:
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "22P02" {
+			status = http.StatusBadRequest
+			message = "invalid input"
+		}
 	}
 
-	WriteJSON(w, status, statusErrors.ErrorResponse{Message: err.Error()})
+	if status == http.StatusInternalServerError {
+		slog.Error("unhandled request error", "error", err)
+		message = "internal server error"
+	}
+
+	WriteJSON(w, status, statusErrors.ErrorResponse{Message: message})
 }
 
 func GenerateToken(userID string, secret []byte, ttl time.Duration) (string, error) {
