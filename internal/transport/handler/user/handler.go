@@ -14,7 +14,7 @@ import (
 )
 
 type ItemCreator interface {
-	Create(ctx context.Context, userID, id string, in dto.CreateItemRequest) (string, error)
+	Create(ctx context.Context, userID string, in dto.CreateItemRequest) (string, error)
 }
 
 type UserService interface {
@@ -137,7 +137,7 @@ func (h *UserHandler) AddItem(w http.ResponseWriter, r *http.Request) {
 		utilhttp.WriteError(w, statusErrors.ErrBadRequest)
 		return
 	}
-	id, err := h.itemService.Create(r.Context(), userID, "", *req)
+	id, err := h.itemService.Create(r.Context(), userID, *req)
 	if err != nil {
 		utilhttp.WriteError(w, err)
 		return

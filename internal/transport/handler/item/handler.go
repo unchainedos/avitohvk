@@ -14,7 +14,7 @@ import (
 )
 
 type ItemService interface {
-	Create(ctx context.Context, userID, id string, in dto.CreateItemRequest) (string, error)
+	Create(ctx context.Context, userID string, in dto.CreateItemRequest) (string, error)
 	Get(ctx context.Context, id string) (domain.Item, error)
 	Update(ctx context.Context, actorID, itemID string, in dto.UpdateItemRequest) (domain.Item, error)
 	Delete(ctx context.Context, actorID, itemID string) error
@@ -32,7 +32,7 @@ func (h *ItemHandler) RegisterPublicRoutes(r chi.Router) {
 }
 
 func (h *ItemHandler) RegisterProtectedRoutes(r chi.Router) {
-	r.Post("/items/{item_id}", h.Create)
+	r.Post("/items", h.Create)
 	r.Patch("/items/{item_id}", h.Update)
 	r.Delete("/items/{item_id}", h.Delete)
 }
@@ -43,13 +43,12 @@ func (h *ItemHandler) Create(w http.ResponseWriter, r *http.Request) {
 		utilhttp.WriteError(w, statusErrors.ErrUnauthorized)
 		return
 	}
-	itemID := chi.URLParam(r, "item_id")
 	req, err := utilhttp.ReadFromJSON[dto.CreateItemRequest](r)
 	if err != nil {
 		utilhttp.WriteError(w, statusErrors.ErrBadRequest)
 		return
 	}
-	id, err := h.service.Create(r.Context(), userID, itemID, *req)
+	id, err := h.service.Create(r.Context(), userID, *req)
 	if err != nil {
 		utilhttp.WriteError(w, err)
 		return

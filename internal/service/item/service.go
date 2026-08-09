@@ -28,7 +28,7 @@ func NewService(repo Repository) *Service {
 	return &Service{repo: repo}
 }
 
-func (s *Service) Create(ctx context.Context, userID, id string, in dto.CreateItemRequest) (string, error) {
+func (s *Service) Create(ctx context.Context, userID string, in dto.CreateItemRequest) (string, error) {
 	title := strings.TrimSpace(in.Title)
 	if userID == "" {
 		return "", statusErrors.ErrUnauthorized
@@ -36,12 +36,11 @@ func (s *Service) Create(ctx context.Context, userID, id string, in dto.CreateIt
 	if title == "" {
 		return "", fmt.Errorf("%w: title required", statusErrors.ErrBadRequest)
 	}
-	quantity := in.Quantity
+	quantity := in.Quantity.Float64()
 	if quantity <= 0 {
 		quantity = 1
 	}
 	item := domain.Item{
-		ID:          id,
 		AuthorID:    userID,
 		HolderID:    userID,
 		Title:       title,
@@ -107,10 +106,11 @@ func (s *Service) Update(ctx context.Context, actorID, itemID string, in dto.Upd
 		current.Unit = in.Unit
 	}
 	if in.Quantity != nil {
-		if *in.Quantity <= 0 {
+		q := in.Quantity.Float64()
+		if q <= 0 {
 			return domain.Item{}, fmt.Errorf("%w: quantity must be > 0", statusErrors.ErrBadRequest)
 		}
-		current.Quantity = *in.Quantity
+		current.Quantity = q
 	}
 	if err := s.repo.Update(ctx, itemID, current); err != nil {
 		if errors.Is(err, itemrepo.ErrNotFound) {
