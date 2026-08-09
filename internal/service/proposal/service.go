@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math/rand/v2"
 	"time"
 
 	"avitohvk/internal/domain"
@@ -17,12 +18,24 @@ import (
 
 const (
 	defaultNegotiationWindow = 24 * time.Hour
-	maxLockChainRetries      = 3
+	maxDeadlockRetries       = 20
 )
 
 func isDeadlock(err error) bool {
 	var pgErr *pgconn.PgError
 	return errors.As(err, &pgErr) && pgErr.Code == "40P01"
+}
+
+func retryOnDeadlock(fn func() error) error {
+	var err error
+	for attempt := 0; attempt <= maxDeadlockRetries; attempt++ {
+		err = fn()
+		if err == nil || !isDeadlock(err) {
+			return err
+		}
+		time.Sleep(time.Duration(20+rand.IntN(200)) * time.Millisecond)
+	}
+	return err
 }
 
 type DealRepository interface {
@@ -252,7 +265,12 @@ func (s *Service) Approve(ctx context.Context, actorID, dealID string) (domain.P
 		return domain.Proposal{}, err
 	}
 
-	p, err := s.proposals.SetStatus(ctx, dealID, actorID, domain.ProposalStatusAccepted)
+	var p domain.Proposal
+	err = retryOnDeadlock(func() error {
+		var setErr error
+		p, setErr = s.proposals.SetStatus(ctx, dealID, actorID, domain.ProposalStatusAccepted)
+		return setErr
+	})
 	if err != nil {
 		if errors.Is(err, proposalrepo.ErrNotFound) {
 			return domain.Proposal{}, fmt.Errorf("%w: proposal not found", statusErrors.ErrNotFound)
@@ -269,15 +287,10 @@ func (s *Service) Approve(ctx context.Context, actorID, dealID string) (domain.P
 		return domain.Proposal{}, err
 	}
 
-	var lockErr error
-	for attempt := 0; attempt <= maxLockChainRetries; attempt++ {
-		lockErr = s.proposals.TryLockChain(ctx, dealID)
-		if lockErr == nil || !isDeadlock(lockErr) {
-			break
-		}
-	}
-	if lockErr != nil {
-		return domain.Proposal{}, lockErr
+	if err := retryOnDeadlock(func() error {
+		return s.proposals.TryLockChain(ctx, dealID)
+	}); err != nil {
+		return domain.Proposal{}, err
 	}
 
 	allAccepted, err := s.proposals.AllAccepted(ctx, dealID)
