@@ -7,14 +7,13 @@ import (
 	"time"
 
 	"avitohvk/config"
-	chownrepo "avitohvk/internal/repository/chown"
-	dealrepo "avitohvk/internal/repository/deal"
-	proposalrepo "avitohvk/internal/repository/proposal"
+	itemrepo "avitohvk/internal/repository/item"
 	userrepo "avitohvk/internal/repository/user"
+	wishrepo "avitohvk/internal/repository/wish"
 	"avitohvk/internal/server"
-	chownservice "avitohvk/internal/service/chown"
-	proposalservice "avitohvk/internal/service/proposal"
+	itemservice "avitohvk/internal/service/item"
 	userservice "avitohvk/internal/service/user"
+	wishservice "avitohvk/internal/service/wish"
 	"avitohvk/internal/transport/handler/auth"
 	"avitohvk/internal/transport/handler/chown"
 	"avitohvk/internal/transport/handler/deal"
@@ -50,10 +49,20 @@ func main() {
 	if cfg.JWT.TTL != nil {
 		jwtTTL = *cfg.JWT.TTL
 	}
-	repo := userrepo.NewRepository(pool)
-	userSvc := userservice.NewService(repo, []byte(cfg.JWT.Secret), jwtTTL)
+
+	userRepository := userrepo.NewRepository(pool)
+	itemRepository := itemrepo.NewRepository(pool)
+	wishRepository := wishrepo.NewRepository(pool)
+
+	userSvc := userservice.NewService(userRepository, []byte(cfg.JWT.Secret), jwtTTL)
+	itemSvc := itemservice.NewService(itemRepository)
+	wishSvc := wishservice.NewService(wishRepository)
+
 	authHandler := auth.New(userSvc, jwtTTL)
-	userHandler := user.New(userSvc)
+	userHandler := user.New(userSvc, itemSvc)
+	itemHandler := item.New(itemSvc)
+	wishHandler := wish.New(wishSvc)
+	usersHandler := users.New(itemSvc)
 
 	chownRepo := chownrepo.NewRepository(pool)
 	chownSvc := chownservice.NewService(chownRepo)

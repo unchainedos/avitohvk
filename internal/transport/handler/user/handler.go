@@ -13,6 +13,10 @@ import (
 	"github.com/go-chi/chi/v5"
 )
 
+type ItemCreator interface {
+	Create(ctx context.Context, userID string, in dto.CreateItemRequest) (string, error)
+}
+
 type UserService interface {
 	Register(ctx context.Context, username, password string) (string, error)
 	Get(ctx context.Context, userID string) (domain.User, error)
@@ -21,11 +25,14 @@ type UserService interface {
 }
 
 type UserHandler struct {
-	service UserService
+	service     UserService
+	itemService ItemCreator
 }
 
-func New(service UserService) *UserHandler {
-	return &UserHandler{service: service}
+func New(service UserService, itemService ItemCreator) *UserHandler {
+	return &UserHandler{
+		service:     service,
+		itemService: itemService}
 }
 
 func (h *UserHandler) RegisterPublicRoutes(r chi.Router) {
@@ -120,7 +127,22 @@ func (h *UserHandler) Delete(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *UserHandler) AddItem(w http.ResponseWriter, r *http.Request) {
-	utilhttp.WriteJSON(w, http.StatusOK, map[string]string{"content": "user hello world"})
+	userID, ok := middleware.UserIDFromContext(r.Context())
+	if !ok {
+		utilhttp.WriteError(w, statusErrors.ErrUnauthorized)
+		return
+	}
+	req, err := utilhttp.ReadFromJSON[dto.CreateItemRequest](r)
+	if err != nil {
+		utilhttp.WriteError(w, statusErrors.ErrBadRequest)
+		return
+	}
+	id, err := h.itemService.Create(r.Context(), userID, *req)
+	if err != nil {
+		utilhttp.WriteError(w, err)
+		return
+	}
+	_ = utilhttp.WriteJSON(w, http.StatusCreated, dto.CreateItemResponse{ID: id})
 }
 
 func toUserResponse(u domain.User) dto.UserResponse {
