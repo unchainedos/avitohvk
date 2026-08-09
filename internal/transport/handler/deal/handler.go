@@ -13,23 +13,23 @@ import (
 	"github.com/go-chi/chi/v5"
 )
 
-type DealService interface {
+type Service interface {
 	GetByID(ctx context.Context, id string) (domain.Deal, error)
 }
 
-type DealHandler struct {
-	service DealService
+type Handler struct {
+	service Service
 }
 
-func New(service DealService) *DealHandler {
-	return &DealHandler{service: service}
+func New(service Service) *Handler {
+	return &Handler{service: service}
 }
 
-func (h *DealHandler) RegisterRoutes(r chi.Router) {
+func (h *Handler) RegisterRoutes(r chi.Router) {
 	r.Get("/deal/{deal_id}", h.Get)
 }
 
-func (h *DealHandler) Get(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
 	if _, ok := middleware.UserIDFromContext(r.Context()); !ok {
 		utilhttp.WriteError(w, statusErrors.ErrUnauthorized)
 		return
