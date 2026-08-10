@@ -65,15 +65,19 @@ go test -race ./...
 ## Технологии
 
 **Backend**
-- Go 1.25
-- [chi](https://github.com/go-chi/chi) — HTTP-роутинг
-- [pgx/v5](https://github.com/jackc/pgx) + `pgxpool` — драйвер и пул соединений PostgreSQL
-- PostgreSQL 17
-- [golang-jwt/v5](https://github.com/golang-jwt/jwt) — JWT (HS256), передаётся через httpOnly-cookie
-- [viper](https://github.com/spf13/viper) — конфигурация из YAML
-- [testcontainers-go](https://golang.testcontainers.org/) — интеграционные тесты против настоящего Postgres в одноразовом контейнере
-- [golangci-lint](https://golangci-lint.run/) — статический анализ (см. `.golangci.yml`)
-- Docker / Docker Compose — контейнеризация и локальный запуск стека
+Вот ваш список технологий с баджами вместо названий:
+
+---
+
+- ![Go](https://img.shields.io/badge/-1.25-00ADD8?style=flat&logo=go&logoColor=white)
+- ![chi](https://img.shields.io/badge/-HTTP_router-00ADD8?style=flat&logo=go&logoColor=white) — HTTP-роутинг
+- ![pgx](https://img.shields.io/badge/-v5-336791?style=flat&logo=postgresql&logoColor=white) + `pgxpool` — драйвер и пул соединений PostgreSQL
+- ![PostgreSQL](https://img.shields.io/badge/-17-336791?style=flat&logo=postgresql&logoColor=white)
+- ![JWT](https://img.shields.io/badge/-v5-000000?style=flat&logo=jsonwebtokens&logoColor=white) — JWT (HS256), передаётся через httpOnly-cookie
+- ![Viper](https://img.shields.io/badge/-config-00ADD8?style=flat&logo=go&logoColor=white) — конфигурация из YAML
+- ![Testcontainers](https://img.shields.io/badge/-go-24A9DF?style=flat&logo=docker&logoColor=white) — интеграционные тесты против настоящего Postgres в одноразовом контейнере
+- ![golangci-lint](https://img.shields.io/badge/-static_analysis-00ADD8?style=flat&logo=go&logoColor=white) — статический анализ (см. `.golangci.yml`)
+- ![Docker](https://img.shields.io/badge/-Compose-2496ED?style=flat&logo=docker&logoColor=white) — контейнеризация и локальный запуск стека
 
 **Frontend** (`web/`)
 - React 19 + TypeScript + Vite
@@ -179,3 +183,5 @@ avitohvk/
 3. **Разработка поисковика для нашего решения.** Я разрабатывал поисковый модуль с пагинацией на основе параметров limit и offset, без внедрения дополнительных фильтров. Настраивал выдачу результатов таким образом, чтобы пользователь мог последовательно просматривать все найденные элементы.
 
 4. **Координация команды и контроль соответствия бизнес-целям.** Я синхронизировал работу всех участников, проверял, что разрабатываемый продукт соответствует изначальным бизнес-требованиям, а не уходит в технические излишества.
+
+5. **Ревью кода** Проводил код-ревью для каждого pr, проверял, что выполненная участником работа соответствует тому, что написано в issue.
