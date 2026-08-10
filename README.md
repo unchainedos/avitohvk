@@ -65,10 +65,6 @@ go test -race ./...
 ## Технологии
 
 **Backend**
-Вот ваш список технологий с баджами вместо названий:
-
----
-
 - ![Go](https://img.shields.io/badge/-1.25-00ADD8?style=flat&logo=go&logoColor=white)
 - ![chi](https://img.shields.io/badge/-HTTP_router-00ADD8?style=flat&logo=go&logoColor=white) — HTTP-роутинг
 - ![pgx](https://img.shields.io/badge/-v5-336791?style=flat&logo=postgresql&logoColor=white) + `pgxpool` — драйвер и пул соединений PostgreSQL
