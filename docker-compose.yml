@@ -59,11 +59,25 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      init_container:
+        condition: service_completed_successfully
     ports:
       - "8080:8080"  # ХОСТ:КОНТЕЙНЕР
     networks:
       - app-net
     restart: unless-stopped
+
+  frontend:
+    build: ./web
+    container_name: avitohvk-frontend
+    depends_on:
+      - app
+    ports:
+      - "3000:5173"
+    networks:
+      - app-net
+    restart: unless-stopped
+
 
 volumes:
   postgres_data:
@@ -71,3 +85,7 @@ volumes:
 networks:
   app-net:
     driver: bridge
+
+
+
+  
