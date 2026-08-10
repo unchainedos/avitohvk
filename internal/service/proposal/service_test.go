@@ -72,6 +72,7 @@ type fakeProposalRepo struct {
 	allAcceptedFunc         func(ctx context.Context, dealID string) (bool, error)
 	tryLockChainFunc        func(ctx context.Context, dealID string) error
 	listTransfersFunc       func(ctx context.Context, dealID string) ([]domain.ItemTransfer, error)
+	findOpenDealFunc        func(ctx context.Context, itemID, participantID string) (string, bool, error)
 
 	unlockAllForDealErr  error
 	declineAllExceptErr  error
@@ -151,6 +152,13 @@ func (f *fakeProposalRepo) ListTransfers(ctx context.Context, dealID string) ([]
 		return f.listTransfersFunc(ctx, dealID)
 	}
 	return nil, nil
+}
+
+func (f *fakeProposalRepo) FindOpenDealAsRecipient(ctx context.Context, itemID, participantID string) (string, bool, error) {
+	if f.findOpenDealFunc != nil {
+		return f.findOpenDealFunc(ctx, itemID, participantID)
+	}
+	return "", false, nil
 }
 
 type fakeChownRepo struct {
@@ -1077,6 +1085,59 @@ func TestService_ListForUser(t *testing.T) {
 		svc := newService(nil, proposals, nil)
 
 		_, err := svc.ListForUser(context.Background(), "actor-1", "actor-1")
+		if !errors.Is(err, boom) {
+			t.Errorf("error = %v, want wrapping %v", err, boom)
+		}
+	})
+}
+
+func TestService_FindOpenDealAsRecipient(t *testing.T) {
+	t.Parallel()
+
+	t.Run("found", func(t *testing.T) {
+		t.Parallel()
+		proposals := &fakeProposalRepo{findOpenDealFunc: func(_ context.Context, itemID, participantID string) (string, bool, error) {
+			if itemID != "item-1" || participantID != "actor-1" {
+				t.Errorf("FindOpenDealAsRecipient called with (%q, %q)", itemID, participantID)
+			}
+			return "deal-1", true, nil
+		}}
+		svc := newService(nil, proposals, nil)
+
+		dealID, found, err := svc.FindOpenDealAsRecipient(context.Background(), "item-1", "actor-1")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if !found || dealID != "deal-1" {
+			t.Errorf("FindOpenDealAsRecipient() = (%q, %v), want (\"deal-1\", true)", dealID, found)
+		}
+	})
+
+	t.Run("not found", func(t *testing.T) {
+		t.Parallel()
+		proposals := &fakeProposalRepo{findOpenDealFunc: func(context.Context, string, string) (string, bool, error) {
+			return "", false, nil
+		}}
+		svc := newService(nil, proposals, nil)
+
+		dealID, found, err := svc.FindOpenDealAsRecipient(context.Background(), "item-1", "actor-1")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if found || dealID != "" {
+			t.Errorf("FindOpenDealAsRecipient() = (%q, %v), want (\"\", false)", dealID, found)
+		}
+	})
+
+	t.Run("repository error propagates", func(t *testing.T) {
+		t.Parallel()
+		boom := errors.New("db down")
+		proposals := &fakeProposalRepo{findOpenDealFunc: func(context.Context, string, string) (string, bool, error) {
+			return "", false, boom
+		}}
+		svc := newService(nil, proposals, nil)
+
+		_, _, err := svc.FindOpenDealAsRecipient(context.Background(), "item-1", "actor-1")
 		if !errors.Is(err, boom) {
 			t.Errorf("error = %v, want wrapping %v", err, boom)
 		}

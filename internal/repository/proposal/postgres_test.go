@@ -1373,3 +1373,124 @@ func TestRepository_UnlockAllForDeal_OnlyReleasesItemsLockedByThisDeal(t *testin
 		t.Errorf("bareChownItem is_locked = false, want unchanged true (not locked by any deal, out of scope)")
 	}
 }
+
+func TestRepository_FindOpenDealAsRecipient_Found(t *testing.T) {
+	t.Parallel()
+
+	pool := dbtest.NewPool(t)
+	repo := NewRepository(pool)
+	ctx := context.Background()
+
+	creator := seedUser(t, pool)
+	rootItem := seedItem(t, pool, creator, creator, false)
+	dealID := seedDeal(t, pool, rootItem, creator, 3600, nil)
+
+	offerer := seedUser(t, pool)
+	recipient := seedUser(t, pool)
+	offeredItem := seedItem(t, pool, offerer, offerer, false)
+	seedProposal(t, pool, dealID, offerer, offeredItem, recipient, 1, domain.ProposalStatusPending)
+
+	gotDealID, found, err := repo.FindOpenDealAsRecipient(ctx, offeredItem, recipient)
+	if err != nil {
+		t.Fatalf("FindOpenDealAsRecipient: %v", err)
+	}
+	if !found {
+		t.Fatalf("found = false, want true")
+	}
+	if gotDealID != dealID {
+		t.Errorf("dealID = %q, want %q", gotDealID, dealID)
+	}
+}
+
+func TestRepository_FindOpenDealAsRecipient_NotFound_WrongParticipant(t *testing.T) {
+	t.Parallel()
+
+	pool := dbtest.NewPool(t)
+	repo := NewRepository(pool)
+	ctx := context.Background()
+
+	creator := seedUser(t, pool)
+	rootItem := seedItem(t, pool, creator, creator, false)
+	dealID := seedDeal(t, pool, rootItem, creator, 3600, nil)
+
+	offerer := seedUser(t, pool)
+	recipient := seedUser(t, pool)
+	someoneElse := seedUser(t, pool)
+	offeredItem := seedItem(t, pool, offerer, offerer, false)
+	seedProposal(t, pool, dealID, offerer, offeredItem, recipient, 1, domain.ProposalStatusPending)
+
+	_, found, err := repo.FindOpenDealAsRecipient(ctx, offeredItem, someoneElse)
+	if err != nil {
+		t.Fatalf("FindOpenDealAsRecipient: %v", err)
+	}
+	if found {
+		t.Errorf("found = true, want false (someoneElse is not the designated recipient)")
+	}
+}
+
+func TestRepository_FindOpenDealAsRecipient_NotFound_WrongItem(t *testing.T) {
+	t.Parallel()
+
+	pool := dbtest.NewPool(t)
+	repo := NewRepository(pool)
+	ctx := context.Background()
+
+	creator := seedUser(t, pool)
+	rootItem := seedItem(t, pool, creator, creator, false)
+	dealID := seedDeal(t, pool, rootItem, creator, 3600, nil)
+
+	offerer := seedUser(t, pool)
+	recipient := seedUser(t, pool)
+	offeredItem := seedItem(t, pool, offerer, offerer, false)
+	unrelatedItem := seedItem(t, pool, offerer, offerer, false)
+	seedProposal(t, pool, dealID, offerer, offeredItem, recipient, 1, domain.ProposalStatusPending)
+
+	_, found, err := repo.FindOpenDealAsRecipient(ctx, unrelatedItem, recipient)
+	if err != nil {
+		t.Fatalf("FindOpenDealAsRecipient: %v", err)
+	}
+	if found {
+		t.Errorf("found = true, want false (recipient is not promised unrelatedItem)")
+	}
+}
+
+func TestRepository_FindOpenDealAsRecipient_NotFound_ChainAlreadyClosed(t *testing.T) {
+	t.Parallel()
+
+	pool := dbtest.NewPool(t)
+	repo := NewRepository(pool)
+	ctx := context.Background()
+
+	creator := seedUser(t, pool)
+	rootItem := seedItem(t, pool, creator, creator, false)
+	deadline := time.Now().Add(time.Hour)
+	dealID := seedDeal(t, pool, rootItem, creator, 3600, &deadline)
+
+	offerer := seedUser(t, pool)
+	recipient := seedUser(t, pool)
+	offeredItem := seedItem(t, pool, offerer, offerer, false)
+	seedProposal(t, pool, dealID, offerer, offeredItem, recipient, 1, domain.ProposalStatusPending)
+
+	_, found, err := repo.FindOpenDealAsRecipient(ctx, offeredItem, recipient)
+	if err != nil {
+		t.Fatalf("FindOpenDealAsRecipient: %v", err)
+	}
+	if found {
+		t.Errorf("found = true, want false (chain already closed to new participants)")
+	}
+}
+
+func TestRepository_FindOpenDealAsRecipient_NotFound_NoSuchDeal(t *testing.T) {
+	t.Parallel()
+
+	pool := dbtest.NewPool(t)
+	repo := NewRepository(pool)
+
+	_, found, err := repo.FindOpenDealAsRecipient(context.Background(), "00000000-0000-0000-0000-000000000000", "00000000-0000-0000-0000-000000000000")
+	if err != nil {
+		t.Fatalf("FindOpenDealAsRecipient: %v", err)
+	}
+	if found {
+		t.Errorf("found = true, want false")
+	}
+}

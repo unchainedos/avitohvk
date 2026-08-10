@@ -57,6 +57,7 @@ type Repository interface {
 	DeclineAllExcept(ctx context.Context, dealID, actorID string) error
 	DeclineAllForDeal(ctx context.Context, dealID string) error
 	ListTransfers(ctx context.Context, dealID string) ([]domain.ItemTransfer, error)
+	FindOpenDealAsRecipient(ctx context.Context, itemID, participantID string) (string, bool, error)
 }
 
 type ChownRepository interface {
@@ -248,6 +249,10 @@ func (s *Service) ListForUser(ctx context.Context, actorID, userID string) ([]do
 		return nil, err
 	}
 	return list, nil
+}
+
+func (s *Service) FindOpenDealAsRecipient(ctx context.Context, itemID, participantID string) (dealID string, found bool, err error) {
+	return s.proposals.FindOpenDealAsRecipient(ctx, itemID, participantID)
 }
 
 func (s *Service) Approve(ctx context.Context, actorID, dealID string) (domain.Proposal, error) {

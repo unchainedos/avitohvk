@@ -69,8 +69,8 @@ func main() {
 	userSvc := userservice.NewService(userRepository, []byte(cfg.JWT.Secret), jwtTTL)
 	itemSvc := itemservice.NewService(itemRepository)
 	wishSvc := wishservice.NewService(wishRepository)
-	chownSvc := chownservice.NewService(chownRepo)
 	proposalSvc := proposalservice.NewService(dealRepo, proposalRepo, chownRepo)
+	chownSvc := chownservice.NewService(chownRepo, proposalSvc)
 
 	searchHandler := search.New(searchSvc)
 	authHandler := auth.New(userSvc, jwtTTL)

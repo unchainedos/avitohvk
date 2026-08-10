@@ -439,6 +439,26 @@ func (r *Repository) ListTransfers(ctx context.Context, dealID string) ([]domain
 	return list, nil
 }
 
+func (r *Repository) FindOpenDealAsRecipient(ctx context.Context, itemID, participantID string) (dealID string, found bool, err error) {
+	const q = `
+		SELECT cd.id::text
+		FROM chain_deals cd
+		JOIN chain_deal_transactions cdt ON cdt.deal_id = cd.id
+		JOIN transactions t ON t.id = cdt.transaction_id
+		WHERE cd.status = 'PENDING' AND cd.deadline_at IS NULL
+		  AND t.item_id = $1::uuid AND t.to_user = $2::uuid
+		LIMIT 1
+	`
+	err = r.pool.QueryRow(ctx, q, itemID, participantID).Scan(&dealID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", false, nil
+	}
+	if err != nil {
+		return "", false, err
+	}
+	return dealID, true, nil
+}
+
 func (r *Repository) DeclineAllExcept(ctx context.Context, dealID, actorID string) error {
 	const q = `
 		UPDATE chain_deal_transactions
