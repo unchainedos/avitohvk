@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 
+	"avitohvk/internal/domain"
 	"avitohvk/internal/dto"
 	statusErrors "avitohvk/internal/errors"
 	"avitohvk/internal/transport/middleware"
@@ -13,7 +14,7 @@ import (
 )
 
 type Service interface {
-	Chown(ctx context.Context, actorID, itemID string, req dto.ChownRequest) (dto.ChownResponse, error)
+	Chown(ctx context.Context, actorID, itemID string, req dto.CreateProposalRequest) (domain.Proposal, error)
 }
 
 type Handler struct {
@@ -35,15 +36,28 @@ func (h *Handler) Chown(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	itemID := chi.URLParam(r, "item_id")
-	req, err := utilhttp.ReadFromJSON[dto.ChownRequest](r)
+	req, err := utilhttp.ReadFromJSON[dto.CreateProposalRequest](r)
 	if err != nil {
 		utilhttp.WriteError(w, statusErrors.ErrBadRequest)
 		return
 	}
-	resp, err := h.service.Chown(r.Context(), actorID, itemID, *req)
+	p, err := h.service.Chown(r.Context(), actorID, itemID, *req)
 	if err != nil {
 		utilhttp.WriteError(w, err)
 		return
 	}
-	_ = utilhttp.WriteJSON(w, http.StatusCreated, resp)
+	_ = utilhttp.WriteJSON(w, http.StatusCreated, toProposalResponse(&p))
+}
+
+func toProposalResponse(p *domain.Proposal) dto.ProposalResponse {
+	return dto.ProposalResponse{
+		DealID:        p.DealID,
+		TransactionID: p.TransactionID,
+		ParticipantID: p.ParticipantID,
+		ItemID:        p.ItemID,
+		ToUserID:      p.ToUserID,
+		Quantity:      p.Quantity,
+		Status:        string(p.Status),
+		UpdatedAt:     p.UpdatedAt,
+	}
 }

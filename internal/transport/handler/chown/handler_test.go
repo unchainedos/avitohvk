@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"avitohvk/internal/domain"
 	"avitohvk/internal/dto"
 	statusErrors "avitohvk/internal/errors"
 	"avitohvk/internal/transport/middleware"
@@ -18,17 +19,17 @@ import (
 )
 
 type fakeService struct {
-	result dto.ChownResponse
+	result domain.Proposal
 	err    error
 
 	called     bool
 	gotCtx     context.Context
 	gotActorID string
 	gotItemID  string
-	gotReq     dto.ChownRequest
+	gotReq     dto.CreateProposalRequest
 }
 
-func (f *fakeService) Chown(ctx context.Context, actorID, itemID string, req dto.ChownRequest) (dto.ChownResponse, error) {
+func (f *fakeService) Chown(ctx context.Context, actorID, itemID string, req dto.CreateProposalRequest) (domain.Proposal, error) {
 	f.called = true
 	f.gotCtx = ctx
 	f.gotActorID = actorID
@@ -57,7 +58,7 @@ func TestHandler_Chown_NoAuth(t *testing.T) {
 	svc := &fakeService{}
 	r := newTestRouter(svc)
 
-	req := authedRequest(http.MethodPost, "/chown/item-1", "", `{"offered_items":[{"item_id":"x","quantity":1}]}`)
+	req := authedRequest(http.MethodPost, "/chown/item-1", "", `{"item_id":"offer-1","quantity":1}`)
 	rec := httptest.NewRecorder()
 	r.ServeHTTP(rec, req)
 
@@ -77,7 +78,7 @@ func TestHandler_Chown_MalformedBody(t *testing.T) {
 		body string
 	}{
 		{name: "empty body", body: ""},
-		{name: "truncated json", body: `{"offered_items":`},
+		{name: "truncated json", body: `{"item_id":`},
 	}
 
 	for _, tt := range tests {
@@ -130,7 +131,7 @@ func TestHandler_Chown_ForwardsRequestContext(t *testing.T) {
 	svc := &fakeService{}
 	r := newTestRouter(svc)
 
-	req := authedRequest(http.MethodPost, "/chown/item-1", "actor-1", `{"offered_items":[{"item_id":"x","quantity":1}]}`)
+	req := authedRequest(http.MethodPost, "/chown/item-1", "actor-1", `{"item_id":"offer-1","quantity":1}`)
 	req = req.WithContext(context.WithValue(req.Context(), ctxKey{}, "trace-id-123"))
 	rec := httptest.NewRecorder()
 	r.ServeHTTP(rec, req)
@@ -161,7 +162,7 @@ func TestHandler_Chown_ServiceErrorMapping(t *testing.T) {
 			svc := &fakeService{err: tt.svcErr}
 			r := newTestRouter(svc)
 
-			req := authedRequest(http.MethodPost, "/chown/item-1", "actor-1", `{"offered_items":[{"item_id":"x","quantity":1}]}`)
+			req := authedRequest(http.MethodPost, "/chown/item-1", "actor-1", `{"item_id":"offer-1","quantity":1}`)
 			rec := httptest.NewRecorder()
 			r.ServeHTTP(rec, req)
 
@@ -175,16 +176,16 @@ func TestHandler_Chown_ServiceErrorMapping(t *testing.T) {
 func TestHandler_Chown_Success(t *testing.T) {
 	t.Parallel()
 
-	createdAt := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
-	svc := &fakeService{result: dto.ChownResponse{
-		ItemID:     "item-1",
-		FromUserID: "actor-1",
-		Hops:       []dto.ChownHop{{ItemID: "offer-1", Quantity: 2, ToUserID: "recipient-1"}},
-		CreatedAt:  createdAt,
-	}}
+	updatedAt := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
+	want := domain.Proposal{
+		DealID: "deal-1", TransactionID: "tx-1", ParticipantID: "actor-1",
+		ItemID: "offer-1", ToUserID: "recipient-1", Quantity: 2,
+		Status: domain.ProposalStatusPending, UpdatedAt: updatedAt,
+	}
+	svc := &fakeService{result: want}
 	r := newTestRouter(svc)
 
-	body := `{"offered_items":[{"item_id":"offer-1","quantity":2}]}`
+	body := `{"item_id":"offer-1","quantity":2}`
 	req := authedRequest(http.MethodPost, "/chown/item-1", "actor-1", body)
 	rec := httptest.NewRecorder()
 	r.ServeHTTP(rec, req)
@@ -202,17 +203,19 @@ func TestHandler_Chown_Success(t *testing.T) {
 	if svc.gotItemID != "item-1" {
 		t.Errorf("service received itemID = %q (from the URL param), want %q", svc.gotItemID, "item-1")
 	}
-	wantReq := dto.ChownRequest{OfferedItems: []dto.OfferedItem{{ItemID: "offer-1", Quantity: 2}}}
-	if len(svc.gotReq.OfferedItems) != 1 || svc.gotReq.OfferedItems[0] != wantReq.OfferedItems[0] {
+	wantReq := dto.CreateProposalRequest{ItemID: "offer-1", Quantity: 2}
+	if svc.gotReq != wantReq {
 		t.Errorf("service received req = %+v, want %+v", svc.gotReq, wantReq)
 	}
 
-	var got dto.ChownResponse
+	var got dto.ProposalResponse
 	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
 		t.Fatalf("response is not valid JSON: %v (%q)", err, rec.Body.String())
 	}
-	if got.ItemID != "item-1" || got.FromUserID != "actor-1" || len(got.Hops) != 1 {
-		t.Errorf("response body = %+v", got)
+	if got.DealID != want.DealID || got.TransactionID != want.TransactionID || got.ParticipantID != want.ParticipantID ||
+		got.ItemID != want.ItemID || got.ToUserID != want.ToUserID || got.Quantity != want.Quantity ||
+		got.Status != string(want.Status) || !got.UpdatedAt.Equal(want.UpdatedAt) {
+		t.Errorf("response body = %+v, want fields matching %+v", got, want)
 	}
 	if ct := rec.Header().Get("Content-Type"); ct != "application/json" {
 		t.Errorf("Content-Type = %q, want application/json", ct)
@@ -225,7 +228,7 @@ func TestHandler_Chown_ItemIDComesFromURLNotBody(t *testing.T) {
 	svc := &fakeService{}
 	r := newTestRouter(svc)
 
-	req := authedRequest(http.MethodPost, "/chown/from-url", "actor-1", `{"offered_items":[{"item_id":"offer-1","quantity":1}]}`)
+	req := authedRequest(http.MethodPost, "/chown/from-url", "actor-1", `{"item_id":"offer-1","quantity":1}`)
 	rec := httptest.NewRecorder()
 	r.ServeHTTP(rec, req)
 

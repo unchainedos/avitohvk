@@ -9,80 +9,87 @@ import (
 	"avitohvk/internal/domain"
 	"avitohvk/internal/dto"
 	statusErrors "avitohvk/internal/errors"
-	chownrepo "avitohvk/internal/repository/chown"
 )
 
 type fakeRepo struct {
-	result domain.Chown
-	err    error
+	ensureWishErr error
 
-	called     bool
-	gotCtx     context.Context
-	gotActorID string
-	gotItemID  string
-	gotOffers  []domain.OfferedItem
+	ensureWishCalled  bool
+	gotEnsureWishUser string
+	gotEnsureWishItem string
 }
 
-func (f *fakeRepo) Chown(ctx context.Context, actorID, itemID string, offers []domain.OfferedItem) (domain.Chown, error) {
-	f.called = true
+func (f *fakeRepo) EnsureWish(_ context.Context, userID, itemID string) error {
+	f.ensureWishCalled = true
+	f.gotEnsureWishUser = userID
+	f.gotEnsureWishItem = itemID
+	return f.ensureWishErr
+}
+
+type fakeProposalService struct {
+	findOpenDealID string
+	findOpenFound  bool
+	findOpenErr    error
+
+	createDealResult domain.Proposal
+	createDealErr    error
+
+	createProposalResult domain.Proposal
+	createProposalErr    error
+
+	findOpenCalled     bool
+	gotFindOpenItemID  string
+	gotFindOpenActorID string
+
+	createDealCalled     bool
+	gotCtx               context.Context
+	gotCreateDealActorID string
+	gotCreateDealReq     dto.CreateDealRequest
+
+	createProposalCalled     bool
+	gotCreateProposalActorID string
+	gotCreateProposalDealID  string
+	gotCreateProposalReq     dto.CreateProposalRequest
+}
+
+func (f *fakeProposalService) FindOpenDealAsRecipient(ctx context.Context, itemID, participantID string) (string, bool, error) {
+	f.findOpenCalled = true
 	f.gotCtx = ctx
-	f.gotActorID = actorID
-	f.gotItemID = itemID
-	f.gotOffers = offers
-	return f.result, f.err
+	f.gotFindOpenItemID = itemID
+	f.gotFindOpenActorID = participantID
+	return f.findOpenDealID, f.findOpenFound, f.findOpenErr
+}
+
+func (f *fakeProposalService) CreateDeal(ctx context.Context, actorID string, req dto.CreateDealRequest) (domain.Proposal, error) {
+	f.createDealCalled = true
+	f.gotCtx = ctx
+	f.gotCreateDealActorID = actorID
+	f.gotCreateDealReq = req
+	return f.createDealResult, f.createDealErr
+}
+
+func (f *fakeProposalService) CreateProposal(ctx context.Context, actorID, dealID string, req dto.CreateProposalRequest) (domain.Proposal, error) {
+	f.createProposalCalled = true
+	f.gotCtx = ctx
+	f.gotCreateProposalActorID = actorID
+	f.gotCreateProposalDealID = dealID
+	f.gotCreateProposalReq = req
+	return f.createProposalResult, f.createProposalErr
 }
 
 func TestService_Chown_Validation(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name      string
-		itemID    string
-		req       dto.ChownRequest
-		wantErrIs error
+		name   string
+		itemID string
+		req    dto.CreateProposalRequest
 	}{
-		{
-			name:      "empty item_id",
-			itemID:    "",
-			req:       dto.ChownRequest{OfferedItems: []dto.OfferedItem{{ItemID: "x", Quantity: 1}}},
-			wantErrIs: statusErrors.ErrBadRequest,
-		},
-		{
-			name:      "no offered items",
-			itemID:    "target",
-			req:       dto.ChownRequest{OfferedItems: nil},
-			wantErrIs: statusErrors.ErrBadRequest,
-		},
-		{
-			name:   "an offered item missing item_id",
-			itemID: "target",
-			req: dto.ChownRequest{OfferedItems: []dto.OfferedItem{
-				{ItemID: "ok-one", Quantity: 1},
-				{ItemID: "", Quantity: 1},
-			}},
-			wantErrIs: statusErrors.ErrBadRequest,
-		},
-		{
-			name:      "an offered item with zero quantity",
-			itemID:    "target",
-			req:       dto.ChownRequest{OfferedItems: []dto.OfferedItem{{ItemID: "x", Quantity: 0}}},
-			wantErrIs: statusErrors.ErrBadRequest,
-		},
-		{
-			name:      "an offered item with negative quantity",
-			itemID:    "target",
-			req:       dto.ChownRequest{OfferedItems: []dto.OfferedItem{{ItemID: "x", Quantity: -1}}},
-			wantErrIs: statusErrors.ErrBadRequest,
-		},
-		{
-			name:   "offering the target item itself, as the second offered item",
-			itemID: "target",
-			req: dto.ChownRequest{OfferedItems: []dto.OfferedItem{
-				{ItemID: "ok-one", Quantity: 1},
-				{ItemID: "target", Quantity: 1},
-			}},
-			wantErrIs: statusErrors.ErrBadRequest,
-		},
+		{name: "empty item_id", itemID: "", req: dto.CreateProposalRequest{ItemID: "offer-1", Quantity: 1}},
+		{name: "empty offered item_id", itemID: "target", req: dto.CreateProposalRequest{ItemID: "", Quantity: 1}},
+		{name: "zero quantity", itemID: "target", req: dto.CreateProposalRequest{ItemID: "offer-1", Quantity: 0}},
+		{name: "negative quantity", itemID: "target", req: dto.CreateProposalRequest{ItemID: "offer-1", Quantity: -1}},
+		{name: "offering the target item itself", itemID: "target", req: dto.CreateProposalRequest{ItemID: "target", Quantity: 1}},
 	}
 
 	for _, tt := range tests {
@@ -90,218 +97,198 @@ func TestService_Chown_Validation(t *testing.T) {
 			t.Parallel()
 
 			repo := &fakeRepo{}
-			svc := NewService(repo)
+			fake := &fakeProposalService{}
+			svc := NewService(repo, fake)
 
 			_, err := svc.Chown(context.Background(), "actor-1", tt.itemID, tt.req)
 
-			if err == nil {
-				t.Fatalf("Chown() error = nil, want non-nil")
+			if !errors.Is(err, statusErrors.ErrBadRequest) {
+				t.Errorf("Chown() error = %v, want wrapping ErrBadRequest", err)
 			}
-			if !errors.Is(err, tt.wantErrIs) {
-				t.Errorf("Chown() error = %v, want wrapping %v", err, tt.wantErrIs)
-			}
-			if repo.called {
-				t.Errorf("Chown() called the repository despite a validation failure")
+			if fake.findOpenCalled || fake.createDealCalled || fake.createProposalCalled || repo.ensureWishCalled {
+				t.Errorf("Chown() called the proposal service or repository despite a validation failure")
 			}
 		})
 	}
 }
 
-func TestService_Chown_ValidationPrecedence(t *testing.T) {
+func TestService_Chown_CreatesNewDealWhenNoOpenDealFound(t *testing.T) {
 	t.Parallel()
 
-	// item_id and offered_items are both invalid at once: the item_id check
-	// must win, matching the order the checks appear in the source. If a
-	// refactor ever reorders them, this pins the observable error message
-	// so the change is visible instead of silently altering client-facing
-	// behavior.
+	want := domain.Proposal{DealID: "deal-new", ParticipantID: "actor-1", ItemID: "offer-1", Status: domain.ProposalStatusPending}
 	repo := &fakeRepo{}
-	svc := NewService(repo)
+	fake := &fakeProposalService{findOpenFound: false, createDealResult: want}
+	svc := NewService(repo, fake)
 
-	_, err := svc.Chown(context.Background(), "actor-1", "", dto.ChownRequest{OfferedItems: nil})
-
-	wantText := statusErrors.ErrBadRequest.Error() + ": item_id required"
-	if err == nil || err.Error() != wantText {
-		t.Errorf("Chown() error = %v, want %q (item_id check must take precedence)", err, wantText)
-	}
-}
-
-func TestService_Chown_RepositoryErrorMapping(t *testing.T) {
-	t.Parallel()
-
-	validReq := dto.ChownRequest{OfferedItems: []dto.OfferedItem{{ItemID: "offer-1", Quantity: 1}}}
-
-	tests := []struct {
-		name        string
-		repoErr     error
-		wantErrIs   error
-		wantErrText string
-	}{
-		{
-			name:        "item not found",
-			repoErr:     chownrepo.ErrItemNotFound,
-			wantErrIs:   statusErrors.ErrNotFound,
-			wantErrText: "item not found",
-		},
-		{
-			name:        "not item holder",
-			repoErr:     chownrepo.ErrNotItemHolder,
-			wantErrIs:   statusErrors.ErrConflict,
-			wantErrText: "you do not hold this item",
-		},
-		{
-			name:        "recipient not found",
-			repoErr:     chownrepo.ErrRecipientNotFound,
-			wantErrIs:   statusErrors.ErrNotFound,
-			wantErrText: "no one wishes for this item",
-		},
-		{
-			name:        "own item",
-			repoErr:     chownrepo.ErrOwnItem,
-			wantErrIs:   statusErrors.ErrBadRequest,
-			wantErrText: "cannot chown your own item",
-		},
-		{
-			name:        "item locked",
-			repoErr:     chownrepo.ErrItemLocked,
-			wantErrIs:   statusErrors.ErrConflict,
-			wantErrText: "someone else already has exclusive rights to this item",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-
-			repo := &fakeRepo{err: tt.repoErr}
-			svc := NewService(repo)
-
-			_, err := svc.Chown(context.Background(), "actor-1", "target", validReq)
-
-			if err == nil {
-				t.Fatalf("Chown() error = nil, want non-nil")
-			}
-			if !errors.Is(err, tt.wantErrIs) {
-				t.Errorf("Chown() error = %v, want wrapping %v", err, tt.wantErrIs)
-			}
-			if err.Error() != tt.wantErrIs.Error()+": "+tt.wantErrText {
-				t.Errorf("Chown() error text = %q, want %q", err.Error(), tt.wantErrIs.Error()+": "+tt.wantErrText)
-			}
-			if !repo.called {
-				t.Errorf("Chown() did not call the repository")
-			}
-		})
-	}
-}
-
-func TestService_Chown_UnmappedRepositoryErrorPassesThroughUnwrapped(t *testing.T) {
-	t.Parallel()
-
-	boom := errors.New("connection reset by peer")
-	repo := &fakeRepo{err: boom}
-	svc := NewService(repo)
-
-	_, err := svc.Chown(context.Background(), "actor-1", "target",
-		dto.ChownRequest{OfferedItems: []dto.OfferedItem{{ItemID: "offer-1", Quantity: 1}}})
-
-	if !errors.Is(err, boom) {
-		t.Errorf("Chown() error = %v, want it to wrap the original unmapped error %v", err, boom)
-	}
-	if errors.Is(err, statusErrors.ErrBadRequest) || errors.Is(err, statusErrors.ErrNotFound) ||
-		errors.Is(err, statusErrors.ErrConflict) || errors.Is(err, statusErrors.ErrUnauthorized) {
-		t.Errorf("Chown() error = %v, an unmapped repository error must not accidentally match a status sentinel", err)
-	}
-}
-
-func TestService_Chown_Success(t *testing.T) {
-	t.Parallel()
-
-	createdAt := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
-	repo := &fakeRepo{
-		result: domain.Chown{
-			ItemID:     "target",
-			FromUserID: "actor-1",
-			Hops: []domain.ChownHop{
-				{ItemID: "offer-1", Quantity: 2, ToUserID: "recipient-1"},
-				{ItemID: "offer-2", Quantity: 1, ToUserID: "recipient-2"},
-			},
-			CreatedAt: createdAt,
-		},
-	}
-	svc := NewService(repo)
-
-	req := dto.ChownRequest{OfferedItems: []dto.OfferedItem{
-		{ItemID: "offer-1", Quantity: 2},
-		{ItemID: "offer-2", Quantity: 1},
-	}}
-
-	type ctxKey struct{}
-	ctx := context.WithValue(context.Background(), ctxKey{}, "trace-id-123")
-
-	got, err := svc.Chown(ctx, "actor-1", "target", req)
+	got, err := svc.Chown(context.Background(), "actor-1", "target", dto.CreateProposalRequest{ItemID: "offer-1", Quantity: 2})
 	if err != nil {
-		t.Fatalf("Chown() unexpected error: %v", err)
+		t.Fatalf("Chown(): %v", err)
 	}
 
-	if repo.gotCtx == nil || repo.gotCtx.Value(ctxKey{}) != "trace-id-123" {
-		t.Errorf("Chown() did not forward the caller's context to the repository unchanged")
+	if !fake.findOpenCalled {
+		t.Fatalf("FindOpenDealAsRecipient was not called")
 	}
-	if repo.gotActorID != "actor-1" {
-		t.Errorf("repo received actorID = %q, want %q", repo.gotActorID, "actor-1")
+	if fake.gotFindOpenItemID != "target" || fake.gotFindOpenActorID != "actor-1" {
+		t.Errorf("FindOpenDealAsRecipient called with (%q, %q), want (%q, %q)", fake.gotFindOpenItemID, fake.gotFindOpenActorID, "target", "actor-1")
 	}
-	if repo.gotItemID != "target" {
-		t.Errorf("repo received itemID = %q, want %q", repo.gotItemID, "target")
+	if !fake.createDealCalled {
+		t.Fatalf("CreateDeal was not called")
 	}
-	wantOffers := []domain.OfferedItem{
-		{ItemID: "offer-1", Quantity: 2},
-		{ItemID: "offer-2", Quantity: 1},
+	if fake.createProposalCalled {
+		t.Errorf("CreateProposal was called, want only CreateDeal")
 	}
-	if len(repo.gotOffers) != len(wantOffers) {
-		t.Fatalf("repo received %d offers, want %d", len(repo.gotOffers), len(wantOffers))
+	wantReq := dto.CreateDealRequest{RootItemID: "target", ItemID: "offer-1", Quantity: 2}
+	if fake.gotCreateDealReq != wantReq {
+		t.Errorf("CreateDeal called with %+v, want %+v", fake.gotCreateDealReq, wantReq)
 	}
-	for i, o := range wantOffers {
-		if repo.gotOffers[i] != o {
-			t.Errorf("repo received offer[%d] = %+v, want %+v", i, repo.gotOffers[i], o)
-		}
+	if fake.gotCreateDealActorID != "actor-1" {
+		t.Errorf("CreateDeal actorID = %q, want %q", fake.gotCreateDealActorID, "actor-1")
 	}
-
-	want := dto.ChownResponse{
-		ItemID:     "target",
-		FromUserID: "actor-1",
-		Hops: []dto.ChownHop{
-			{ItemID: "offer-1", Quantity: 2, ToUserID: "recipient-1"},
-			{ItemID: "offer-2", Quantity: 1, ToUserID: "recipient-2"},
-		},
-		CreatedAt: createdAt,
-	}
-	if got.ItemID != want.ItemID || got.FromUserID != want.FromUserID || !got.CreatedAt.Equal(want.CreatedAt) {
+	if got != want {
 		t.Errorf("Chown() = %+v, want %+v", got, want)
 	}
-	if len(got.Hops) != len(want.Hops) {
-		t.Fatalf("Chown() hops = %+v, want %+v", got.Hops, want.Hops)
+
+	if !repo.ensureWishCalled {
+		t.Errorf("EnsureWish was not called after creating a new chain")
 	}
-	for i := range want.Hops {
-		if got.Hops[i] != want.Hops[i] {
-			t.Errorf("Chown() hop[%d] = %+v, want %+v", i, got.Hops[i], want.Hops[i])
-		}
+	if repo.gotEnsureWishUser != "actor-1" || repo.gotEnsureWishItem != "target" {
+		t.Errorf("EnsureWish called with (%q, %q), want (%q, %q)", repo.gotEnsureWishUser, repo.gotEnsureWishItem, "actor-1", "target")
 	}
 }
 
-func TestService_Chown_SuccessWithNoHopsProducesEmptyNotNilSlice(t *testing.T) {
+func TestService_Chown_JoinsExistingDealWhenFound(t *testing.T) {
 	t.Parallel()
 
-	repo := &fakeRepo{result: domain.Chown{ItemID: "target", FromUserID: "actor-1", Hops: nil}}
-	svc := NewService(repo)
+	want := domain.Proposal{DealID: "deal-existing", ParticipantID: "actor-1", ItemID: "offer-1", Status: domain.ProposalStatusPending}
+	repo := &fakeRepo{}
+	fake := &fakeProposalService{findOpenFound: true, findOpenDealID: "deal-existing", createProposalResult: want}
+	svc := NewService(repo, fake)
 
-	got, err := svc.Chown(context.Background(), "actor-1", "target",
-		dto.ChownRequest{OfferedItems: []dto.OfferedItem{{ItemID: "offer-1", Quantity: 1}}})
+	got, err := svc.Chown(context.Background(), "actor-1", "target", dto.CreateProposalRequest{ItemID: "offer-1", Quantity: 2})
 	if err != nil {
-		t.Fatalf("Chown() unexpected error: %v", err)
+		t.Fatalf("Chown(): %v", err)
 	}
-	if got.Hops == nil {
-		t.Errorf("Chown() Hops = nil, want a non-nil empty slice")
+
+	if !fake.createProposalCalled {
+		t.Fatalf("CreateProposal was not called")
 	}
-	if len(got.Hops) != 0 {
-		t.Errorf("Chown() Hops = %+v, want empty", got.Hops)
+	if fake.createDealCalled {
+		t.Errorf("CreateDeal was called, want only CreateProposal (joining an existing deal)")
+	}
+	if fake.gotCreateProposalActorID != "actor-1" || fake.gotCreateProposalDealID != "deal-existing" {
+		t.Errorf("CreateProposal called with actor=%q deal=%q, want actor-1/deal-existing", fake.gotCreateProposalActorID, fake.gotCreateProposalDealID)
+	}
+	wantReq := dto.CreateProposalRequest{ItemID: "offer-1", Quantity: 2}
+	if fake.gotCreateProposalReq != wantReq {
+		t.Errorf("CreateProposal called with %+v, want %+v", fake.gotCreateProposalReq, wantReq)
+	}
+	if got != want {
+		t.Errorf("Chown() = %+v, want %+v", got, want)
+	}
+
+	if repo.ensureWishCalled {
+		t.Errorf("EnsureWish was called when joining an existing deal — the actor's wish must already exist to have been found as recipient")
+	}
+}
+
+func TestService_Chown_ForwardsRequestContext(t *testing.T) {
+	t.Parallel()
+
+	type ctxKey struct{}
+	repo := &fakeRepo{}
+	fake := &fakeProposalService{}
+	svc := NewService(repo, fake)
+
+	ctx := context.WithValue(context.Background(), ctxKey{}, "trace-id-123")
+	if _, err := svc.Chown(ctx, "actor-1", "target", dto.CreateProposalRequest{ItemID: "offer-1", Quantity: 1}); err != nil {
+		t.Fatalf("Chown(): %v", err)
+	}
+
+	if fake.gotCtx == nil || fake.gotCtx.Value(ctxKey{}) != "trace-id-123" {
+		t.Errorf("Chown() did not forward the caller's context unchanged")
+	}
+}
+
+func TestService_Chown_FindOpenDealErrorPropagates(t *testing.T) {
+	t.Parallel()
+
+	boom := errors.New("db down")
+	repo := &fakeRepo{}
+	fake := &fakeProposalService{findOpenErr: boom}
+	svc := NewService(repo, fake)
+
+	_, err := svc.Chown(context.Background(), "actor-1", "target", dto.CreateProposalRequest{ItemID: "offer-1", Quantity: 1})
+	if !errors.Is(err, boom) {
+		t.Errorf("Chown() error = %v, want wrapping %v", err, boom)
+	}
+	if fake.createDealCalled || fake.createProposalCalled || repo.ensureWishCalled {
+		t.Errorf("Chown() called CreateDeal/CreateProposal/EnsureWish despite a FindOpenDealAsRecipient error")
+	}
+}
+
+func TestService_Chown_CreateDealErrorPropagatesUnwrapped(t *testing.T) {
+	t.Parallel()
+
+	sentinelErr := errors.New("conflict: root item not found")
+	repo := &fakeRepo{}
+	fake := &fakeProposalService{createDealErr: sentinelErr}
+	svc := NewService(repo, fake)
+
+	_, err := svc.Chown(context.Background(), "actor-1", "target", dto.CreateProposalRequest{ItemID: "offer-1", Quantity: 1})
+	if !errors.Is(err, sentinelErr) {
+		t.Errorf("Chown() error = %v, want exactly %v", err, sentinelErr)
+	}
+	if repo.ensureWishCalled {
+		t.Errorf("EnsureWish was called even though CreateDeal failed")
+	}
+}
+
+func TestService_Chown_CreateProposalErrorPropagatesUnwrapped(t *testing.T) {
+	t.Parallel()
+
+	sentinelErr := errors.New("conflict: proposal already exists for this deal")
+	repo := &fakeRepo{}
+	fake := &fakeProposalService{findOpenFound: true, findOpenDealID: "deal-1", createProposalErr: sentinelErr}
+	svc := NewService(repo, fake)
+
+	_, err := svc.Chown(context.Background(), "actor-1", "target", dto.CreateProposalRequest{ItemID: "offer-1", Quantity: 1})
+	if !errors.Is(err, sentinelErr) {
+		t.Errorf("Chown() error = %v, want exactly %v", err, sentinelErr)
+	}
+}
+
+func TestService_Chown_EnsureWishErrorPropagates(t *testing.T) {
+	t.Parallel()
+
+	boom := errors.New("db down")
+	repo := &fakeRepo{ensureWishErr: boom}
+	fake := &fakeProposalService{createDealResult: domain.Proposal{DealID: "deal-1"}}
+	svc := NewService(repo, fake)
+
+	_, err := svc.Chown(context.Background(), "actor-1", "target", dto.CreateProposalRequest{ItemID: "offer-1", Quantity: 1})
+	if !errors.Is(err, boom) {
+		t.Errorf("Chown() error = %v, want wrapping %v", err, boom)
+	}
+}
+
+func TestService_Chown_Success_ReturnsCreatedProposalUnchanged(t *testing.T) {
+	t.Parallel()
+
+	updatedAt := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
+	want := domain.Proposal{
+		DealID: "deal-1", TransactionID: "tx-1", ParticipantID: "actor-1",
+		ItemID: "offer-1", ToUserID: "recipient-1", Quantity: 2,
+		Status: domain.ProposalStatusPending, UpdatedAt: updatedAt,
+	}
+	repo := &fakeRepo{}
+	fake := &fakeProposalService{createDealResult: want}
+	svc := NewService(repo, fake)
+
+	got, err := svc.Chown(context.Background(), "actor-1", "target", dto.CreateProposalRequest{ItemID: "offer-1", Quantity: 2})
+	if err != nil {
+		t.Fatalf("Chown(): %v", err)
+	}
+	if got != want {
+		t.Errorf("Chown() = %+v, want %+v", got, want)
 	}
 }

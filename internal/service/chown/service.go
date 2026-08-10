@@ -2,81 +2,66 @@ package chown
 
 import (
 	"context"
-	"errors"
 	"fmt"
 
 	"avitohvk/internal/domain"
 	"avitohvk/internal/dto"
 	statusErrors "avitohvk/internal/errors"
-	chownrepo "avitohvk/internal/repository/chown"
 )
 
 type Repository interface {
-	Chown(ctx context.Context, actorID, itemID string, offers []domain.OfferedItem) (domain.Chown, error)
+	EnsureWish(ctx context.Context, userID, itemID string) error
+}
+
+type ProposalService interface {
+	CreateDeal(ctx context.Context, actorID string, req dto.CreateDealRequest) (domain.Proposal, error)
+	CreateProposal(ctx context.Context, actorID, dealID string, req dto.CreateProposalRequest) (domain.Proposal, error)
+	FindOpenDealAsRecipient(ctx context.Context, itemID, participantID string) (dealID string, found bool, err error)
 }
 
 type Service struct {
-	repo Repository
+	repo      Repository
+	proposals ProposalService
 }
 
-func NewService(repo Repository) *Service {
-	return &Service{repo: repo}
+func NewService(repo Repository, proposals ProposalService) *Service {
+	return &Service{repo: repo, proposals: proposals}
 }
 
-func (s *Service) Chown(ctx context.Context, actorID, itemID string, req dto.ChownRequest) (dto.ChownResponse, error) {
+func (s *Service) Chown(ctx context.Context, actorID, itemID string, req dto.CreateProposalRequest) (domain.Proposal, error) {
 	if itemID == "" {
-		return dto.ChownResponse{}, fmt.Errorf("%w: item_id required", statusErrors.ErrBadRequest)
+		return domain.Proposal{}, fmt.Errorf("%w: item_id required", statusErrors.ErrBadRequest)
 	}
-	if len(req.OfferedItems) == 0 {
-		return dto.ChownResponse{}, fmt.Errorf("%w: offered_items required", statusErrors.ErrBadRequest)
+	if req.ItemID == "" {
+		return domain.Proposal{}, fmt.Errorf("%w: item_id required for offered item", statusErrors.ErrBadRequest)
 	}
-
-	offers := make([]domain.OfferedItem, 0, len(req.OfferedItems))
-	for _, oi := range req.OfferedItems {
-		if oi.ItemID == "" {
-			return dto.ChownResponse{}, fmt.Errorf("%w: item_id required for every offered item", statusErrors.ErrBadRequest)
-		}
-		if oi.Quantity <= 0 {
-			return dto.ChownResponse{}, fmt.Errorf("%w: quantity must be positive", statusErrors.ErrBadRequest)
-		}
-		if oi.ItemID == itemID {
-			return dto.ChownResponse{}, fmt.Errorf("%w: cannot offer the item you are chowning", statusErrors.ErrBadRequest)
-		}
-		offers = append(offers, domain.OfferedItem{ItemID: oi.ItemID, Quantity: oi.Quantity})
+	if req.Quantity <= 0 {
+		return domain.Proposal{}, fmt.Errorf("%w: quantity must be positive", statusErrors.ErrBadRequest)
+	}
+	if req.ItemID == itemID {
+		return domain.Proposal{}, fmt.Errorf("%w: cannot offer the item you are chowning", statusErrors.ErrBadRequest)
 	}
 
-	result, err := s.repo.Chown(ctx, actorID, itemID, offers)
+	dealID, found, err := s.proposals.FindOpenDealAsRecipient(ctx, itemID, actorID)
 	if err != nil {
-		if errors.Is(err, chownrepo.ErrItemNotFound) {
-			return dto.ChownResponse{}, fmt.Errorf("%w: item not found", statusErrors.ErrNotFound)
-		}
-		if errors.Is(err, chownrepo.ErrNotItemHolder) {
-			return dto.ChownResponse{}, fmt.Errorf("%w: you do not hold this item", statusErrors.ErrConflict)
-		}
-		if errors.Is(err, chownrepo.ErrRecipientNotFound) {
-			return dto.ChownResponse{}, fmt.Errorf("%w: no one wishes for this item", statusErrors.ErrNotFound)
-		}
-		if errors.Is(err, chownrepo.ErrOwnItem) {
-			return dto.ChownResponse{}, fmt.Errorf("%w: cannot chown your own item", statusErrors.ErrBadRequest)
-		}
-		if errors.Is(err, chownrepo.ErrItemLocked) {
-			return dto.ChownResponse{}, fmt.Errorf("%w: someone else already has exclusive rights to this item", statusErrors.ErrConflict)
-		}
-		return dto.ChownResponse{}, err
+		return domain.Proposal{}, err
+	}
+	if found {
+		return s.proposals.CreateProposal(ctx, actorID, dealID, dto.CreateProposalRequest{
+			ItemID: req.ItemID, Quantity: req.Quantity,
+		})
 	}
 
-	return toChownResponse(&result), nil
-}
+	p, err := s.proposals.CreateDeal(ctx, actorID, dto.CreateDealRequest{
+		RootItemID: itemID, ItemID: req.ItemID, Quantity: req.Quantity,
+	})
+	if err != nil {
+		return domain.Proposal{}, err
+	}
 
-func toChownResponse(c *domain.Chown) dto.ChownResponse {
-	hops := make([]dto.ChownHop, 0, len(c.Hops))
-	for _, h := range c.Hops {
-		hops = append(hops, dto.ChownHop{ItemID: h.ItemID, Quantity: h.Quantity, ToUserID: h.ToUserID})
+	if err := s.repo.EnsureWish(ctx, actorID, itemID); err != nil {
+		return domain.Proposal{}, err
 	}
-	return dto.ChownResponse{
-		ItemID:     c.ItemID,
-		FromUserID: c.FromUserID,
-		Hops:       hops,
-		CreatedAt:  c.CreatedAt,
-	}
+
+	return p, nil
 }
